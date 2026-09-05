@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+ssf-state.db
+ssf-state.db-journal
+ssf-state.db-wal
+ssf-state.db-shm
+.env
+.env.*
+!.env.example
