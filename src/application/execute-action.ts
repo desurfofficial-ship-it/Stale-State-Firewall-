@@ -456,12 +456,14 @@ export async function executeAction(
       finished_at: finishedAt,
       duration_ms: ctx.clock.nowMs() - startMs,
       atomicity: executor.atomicity ?? 'not_guaranteed',
+      conditional_execution: 'not_attempted',
     };
     await ctx.store.saveExecution(failed);
     await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
     ctx.audit.append('action.failed', {
       action_id: intent.action_id,
       execution_status: 'failed',
+      conditional_execution: 'not_attempted',
       reason: failed.error,
       latency_ms: failed.duration_ms,
       note: failed.error?.includes('deadline') === true
@@ -483,6 +485,7 @@ export async function executeAction(
     finished_at: finishedAt,
     duration_ms: ctx.clock.nowMs() - startMs,
     atomicity: executor.atomicity ?? 'not_guaranteed',
+    conditional_execution: 'not_attempted',
   };
 
   // Authorization is consumed exactly once, together with the outcome.
@@ -505,6 +508,7 @@ export async function executeAction(
     execution_status: result.success ? 'executed' : 'failed',
     latency_ms: result.duration_ms,
     atomicity: result.atomicity,
+    conditional_execution: 'not_attempted',
     reason: result.success ? 'executed after fresh-state validation' : result.error ?? 'executor reported failure',
   });
 
@@ -636,6 +640,9 @@ async function executeConditionally(
   const startedAt = ctx.clock.nowIso();
   const startMs = ctx.clock.nowMs();
   const expectedStateForAudit = expectedState.map(({ ref, version }) => ({ ref, version }));
+  // Per-dependency provider capability summary: makes the audit trail state
+  // exactly which providers COULD enforce a condition behind this action.
+  const providerCapability = conditionalCapabilityOf(ctx.providers, intent);
 
   let conditional: ConditionalExecutionResult;
   try {
@@ -675,6 +682,7 @@ async function executeConditionally(
       atomicity: failed.atomicity,
       conditional_execution: 'not_attempted',
       expected_state: expectedStateForAudit,
+      provider_capability: providerCapability,
       decision_ref: decision.decision_id,
       note: failed.error?.includes('deadline') === true
         ? 'the side effect may still have been performed by the executor; atomicity is not guaranteed'
@@ -722,6 +730,7 @@ async function executeConditionally(
       expected_state: expectedStateForAudit,
       observed_version: conditional.observed_version,
       provider: executorProviderName(ctx, intent) ?? undefined,
+      provider_capability: providerCapability,
       decision_ref: decision.decision_id,
       reason: 'provider refused the operation: the authorized state changed between authorization and execution',
     });
@@ -828,6 +837,7 @@ async function executeConditionally(
       stage: 'conditional_execution_unavailable',
       conditional_execution: 'unavailable',
       expected_state: expectedStateForAudit,
+      provider_capability: providerCapability,
       decision_ref: decision.decision_id,
       reason: 'executor could not enforce the authorized expected state; failing closed without executing',
     });
@@ -874,6 +884,7 @@ async function executeConditionally(
     atomicity: result.atomicity,
     conditional_execution: 'satisfied',
     expected_state: expectedStateForAudit,
+    provider_capability: providerCapability,
     decision_ref: decision.decision_id,
     reason: result.success
       ? 'executed under provider-enforced conditional execution: the external system verified the authorized state at the moment of mutation'

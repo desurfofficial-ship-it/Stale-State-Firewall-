@@ -95,7 +95,7 @@ actions:
 - **Provider contract**: `test/conditional/providers-conditional.test.ts` — simulated GitHub Contents API (stale sha ⇒ 409 ⇒ no write) and a live local HTTP server (stale `If-Match` ⇒ 412 ⇒ no write; 500 ⇒ error, not condition failure).
 - **Persistence**: SQLite migration v2 round-trip (`SQ1`).
 
-Full run: 242 tests green (186 pre-existing + 56 new); build, lint, typecheck, hygiene green.
+Full run: 243 tests green (186 pre-existing + 57 new); build, typecheck, hygiene green. Correction (independent assurance audit): the milestone originally reported "242 tests, lint green"; the actual count at the milestone commit was 243, and `npm run lint` was failing with three `no-console` errors in `scripts/bench-conditional.ts` (the eslint exemption for `scripts/` covered only `*.mjs`). Both are corrected: the lint config now exempts `scripts/**/*.ts` as originally intended, and the suite includes 50 additional independent assurance tests (canonical race re-verification, kill-mutation sensitivity, CAS concurrency, provider classification, audit tamper behavior, SQLite cross-process claims).
 
 ## Performance
 

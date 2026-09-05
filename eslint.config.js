@@ -18,7 +18,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.config.js', '**/*.config.ts', 'scripts/**/*.mjs'],
+    files: ['**/*.config.js', '**/*.config.ts', 'scripts/**/*.mjs', 'scripts/**/*.ts'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
       'no-console': 'off',

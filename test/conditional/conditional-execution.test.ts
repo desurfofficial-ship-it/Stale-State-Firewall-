@@ -220,10 +220,11 @@ describe('conditional execution: the critical race (milestone §17)', () => {
 
     // This is the documented BEST-EFFORT guarantee of the legacy path: the
     // firewall cannot prevent this execution; it records atomicity
-    // not_guaranteed. Conditional execution (CR1) closes exactly this gap.
+    // not_guaranteed and the conditional outcome as not_attempted.
+    // Conditional execution (CR1) closes exactly this gap.
     expect(outcome.executed).toBe(true);
     expect(outcome.result!.atomicity).toBe('not_guaranteed');
-    expect(outcome.result!.conditional_execution).toBeUndefined();
+    expect(outcome.result!.conditional_execution).toBe('not_attempted');
   });
 });
 
