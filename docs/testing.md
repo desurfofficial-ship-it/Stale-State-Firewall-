@@ -1,0 +1,86 @@
+# Testing strategy
+
+Testing is a first-class requirement (spec §44). The suite lives in `test/` and runs with `npm test` (vitest).
+
+## Layers
+
+### Unit (`test/unit/`)
+
+Pure engines with injected clocks:
+
+- **foundations** — clock monotonicity, staleness bands and boundaries, duration parsing (including malformed rejection), glob matching, canonical JSON/hashing, sortable ids, precondition path resolution.
+- **freshness** — every strategy (ttl/version/hash/preconditions/hybrid): fresh, aging, stale boundaries; missing basis → UNKNOWN; future timestamps → UNKNOWN; conditional-304 freshness; drift → INVALID; provider failure → UNKNOWN; skew tolerance widening (and its absence by default).
+- **decision engine** — composition (invalid > unknown > stale > aging > fresh), policy outcome overrides, AGING risk behavior, precondition failures forcing the invalid path, hard safety floor (CRITICAL+UNKNOWN never ALLOW; INVALID never silently authorizes; residual UNKNOWN after revalidation → deny), STRICT/OBSERVE transformations.
+- **policy resolution** — specificity precedence, explicit-name shortcut, synthetic default, risk derivation order, tie handling.
+- **config validation** — unknown fields, dangerous defaults, contradictions, impossible conditions, duplicate/ambiguous matchers, YAML loading, external policy files, schema versions.
+- **audit/redaction/metrics** — chain append + verification, tamper detection, redaction of credential-shaped keys, counter/latency math — on **both** store backends (memory + SQLite) via `describe.each`.
+
+### Integration (`test/integration/`)
+
+End-to-end through the public SDK and CLI:
+
+- The spec §73 success loop per scenario: fresh→allow, TTL expiry→revalidate→allow, version drift→deny, mixed dependency states, provider outage→fail closed, CRITICAL+unknown→deny, replay→blocked.
+- Escalation lifecycle: ESCALATE → pending freeze → human approval → approved execution with freshness re-verified.
+- Modes: observe preserves `would_have_decided` and does not block; strict denies uncertainty.
+- SQLite persistence round-trip: reopen the database and verify actions, decisions, executions, snapshots, and audit chain integrity survive.
+- Protected tool wrapper: blocked actions never reach the raw tool; duplicate tool names refused.
+- CLI: deterministic exit codes (0/1/2), JSON output, observe-mode semantics, policy test pass/fail, audit verification, doctor, and a live end-to-end check against a local HTTP provider with ETag versioning.
+
+### Contract (`test/contract/`)
+
+Every provider implementation must satisfy the same behavioral contract: support detection, complete snapshots with provenance, mutation detection via version change, conditional verification semantics, and typed failures. Run against: the in-memory provider, the HTTP provider (against a live local server exercising 200/304/500/non-JSON paths), and the GitHub provider (against a simulated GitHub API covering PRs, reviews aggregation, CI status, rate limits, and If-None-Match).
+
+### Kill tests (`test/kill/`)
+
+The adversarial suite (spec §47, §67). The question is never "does the happy path work" but "can we force the firewall to allow an action it should reject?":
+
+- K1 cached/stale state reuse — must always re-fetch
+- K2 forged freshness (recent timestamp + old version)
+- K3 fabricated future timestamps
+- K4 missing versions on critical version-strategy policies
+- K5 provider outage mid-flow — executor never runs
+- K6/K7 replay and pending-escalation freezing
+- K8 clock manipulation — no implicit widening
+- K9/K10 dependency omission (implicit + `require_dependencies`)
+- K11 partial state — preconditions on missing fields fail closed
+- K12 direct-invocation/bypass — duplicate tool identity refused, raw tool unreachable
+- K13/K14 configuration attacks (`on_invalid: allow`; critical + `on_unknown: allow`)
+- K15 audit chain integrity
+- K16 observe-mode bypass check — would-be decisions preserved
+- K17 forged precondition satisfaction — re-checked against current state
+
+### Race conditions (`test/race/`)
+
+Time-of-check/time-of-use with controlled interleaving:
+
+- mutation between validation and execution caught by the TOCTOU re-fetch (R2)
+- mutation after the final fetch documented as `atomicity: not_guaranteed` — never hidden (R3)
+- concurrent execution of one action id: exactly one wins (R4)
+- hanging executor cut off by the deadline, authorization consumed, side-effect uncertainty recorded (R5)
+- check() results never reused across executions (R6)
+- independent firewalls keep independent authorization ledgers (R7)
+
+### Property tests (`test/property/`)
+
+`fast-check` invariants over generated inputs (spec §46):
+
+- CRITICAL never ALLOWED with any INVALID dependency (500 cases)
+- UNKNOWN never becomes ALLOW at any risk under enforcement
+- determinism: identical inputs produce identical decisions (invariant 4)
+- monotonicity: adding worse verdicts never upgrades toward ALLOW
+- staleness classification monotonic in age; aggregation order-insensitive
+- any version drift ⇒ INVALID
+- preconditions type-strict; structural equality order-insensitive
+- duration/glob primitives
+
+## Quality gates (spec §75)
+
+```bash
+npm test             # vitest
+npm run build        # tsc -> dist/
+npm run lint         # eslint (typescript-eslint)
+npm run typecheck    # tsc --noEmit, strict
+npm run check:hygiene  # no unfinished-work markers, no secret-shaped strings
+```
+
+All must pass before the build is considered complete. The hygiene gate enforces the spec §75 requirement that the repository contain no unfinished-work markers and no hardcoded secrets (CI token shapes are detected by pattern).

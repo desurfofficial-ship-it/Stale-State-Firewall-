@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Repository hygiene gate: the spec (§75) forbids TODO/FIXME/placeholder/
-// mock-implementation/fake-provider markers and hardcoded secrets in the tree.
+// Repository hygiene gate: the spec (§75) requires a tree free of
+// unfinished-work markers and hardcoded secrets. This script enforces that.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const ROOT = process.cwd();
 const SCOPES = ['src', 'test', 'examples', 'scripts', 'docs'];
@@ -55,6 +56,7 @@ const violations = [];
 for (const scope of SCOPES) {
   for (const file of walk(join(ROOT, scope))) {
     if (!EXTS.has(extname(file))) continue;
+    if (file === fileURLToPath(import.meta.url)) continue; // this script must encode the patterns it scans for
     const text = readFileSync(file, 'utf8');
     const rel = file.slice(ROOT.length + 1);
     for (const pattern of FORBIDDEN) {

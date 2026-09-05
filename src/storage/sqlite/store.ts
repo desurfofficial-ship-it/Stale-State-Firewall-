@@ -394,7 +394,7 @@ export class SqliteStore implements FirewallStore {
     const db = this.check();
     try {
       db.prepare(
-        `INSERT INTO authorizations (action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version)
+        `INSERT OR REPLACE INTO authorizations (action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         auth.action_id,

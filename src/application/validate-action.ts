@@ -116,7 +116,7 @@ export async function validateAction(
   });
 
   const computedAt = ctx.clock.nowMs();
-  const deadlineMs = policy.execution.deadlineMs ?? defaultDeadlineForRisk(intent.risk_level);
+  const deadlineMs = policy.execution.deadlineMs ?? defaultDeadlineForRisk(intent.risk_level ?? 'MEDIUM');
   const record = buildDecisionRecord({
     ctx,
     intent,
@@ -210,7 +210,7 @@ export function buildDecisionRecord(params: {
     tool: intent.tool,
     operation: intent.operation,
     target: intent.target,
-    risk_level: intent.risk_level as RiskLevel,
+    risk_level: (intent.risk_level ?? 'MEDIUM') as RiskLevel,
     decision: params.decision,
     would_have_decided: null,
     reason: params.reason,

@@ -38,6 +38,7 @@ import { PolicyValidationError, ConfigurationError } from '../domain/errors.js';
 import { loadConfigFile } from '../config/loader.js';
 import type { FirewallRootConfigFile } from '../config/schema.js';
 import { validateConfig } from '../config/validation.js';
+import { normalizeConfigFile } from '../config/normalize.js';
 import { MemoryStore } from '../storage/memory/memory-store.js';
 import { SqliteStore } from '../storage/sqlite/store.js';
 import { InMemoryStateProvider } from '../providers/memory/in-memory-provider.js';
@@ -103,11 +104,11 @@ export class StaleStateFirewall {
 
     let file: FirewallRootConfigFile;
     if (this.options.config) {
-      const violations = validateConfig(this.options.config);
+      file = normalizeConfigFile(this.options.config);
+      const violations = validateConfig(file);
       if (violations.length > 0) {
         throw new PolicyValidationError(violations);
       }
-      file = this.options.config;
     } else {
       file = loadConfigFile(this.options.configPath!).file;
     }
@@ -164,11 +165,16 @@ export class StaleStateFirewall {
 
   /**
    * Validated execution. The executor runs only after an ALLOW decision,
-   * with an immediate pre-execution freshness re-verification.
+   * with an immediate pre-execution freshness re-verification. Pass
+   * `actionId` to pin the identity across attempts (replay protection).
    */
-  async execute(intent: ActionIntentInput, executor: ActionExecutor): Promise<ExecutionOutcome> {
+  async execute(
+    intent: ActionIntentInput,
+    executor: ActionExecutor,
+    options: { actionId?: string } = {},
+  ): Promise<ExecutionOutcome> {
     const ctx = this.requireCtx();
-    return executeAction(ctx, intent, executor);
+    return executeAction(ctx, intent, executor, options);
   }
 
   /** Executes an escalation that a human has approved; freshness is re-verified. */

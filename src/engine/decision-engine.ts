@@ -71,6 +71,10 @@ function defaultAgingOutcome(risk: RiskLevel): OutcomeDecision {
   return RISK_SEVERITY[risk] >= RISK_SEVERITY.HIGH ? 'revalidate' : 'allow';
 }
 
+function severityAtLeast(risk: RiskLevel | null, floor: RiskLevel): boolean {
+  return RISK_SEVERITY[risk ?? 'LOW'] >= RISK_SEVERITY[floor];
+}
+
 function applyStrictMode(outcome: OutcomeDecision, basis: 'fresh' | 'aging' | 'stale' | 'unknown' | 'invalid'): OutcomeDecision {
   if (basis === 'unknown' && outcome === 'allow') return 'deny';
   if (basis === 'unknown' && outcome === 'revalidate') return 'deny';
@@ -82,9 +86,9 @@ function applyStrictMode(outcome: OutcomeDecision, basis: 'fresh' | 'aging' | 's
 function applySafetyFloor(
   outcome: OutcomeDecision,
   basis: 'fresh' | 'aging' | 'stale' | 'unknown' | 'invalid',
-  risk: RiskLevel,
+  risk: RiskLevel | null,
 ): OutcomeDecision {
-  if (basis === 'unknown' && outcome === 'allow' && RISK_SEVERITY[risk] >= RISK_SEVERITY.CRITICAL) {
+  if (basis === 'unknown' && outcome === 'allow' && severityAtLeast(risk, 'CRITICAL')) {
     return 'revalidate';
   }
   if (basis === 'invalid' && outcome === 'allow') {
@@ -121,28 +125,27 @@ export function decide(input: DecisionInput): DecisionOutput {
   const aging = verdicts.filter((v) => v.staleness === 'AGING');
 
   let basis: 'fresh' | 'aging' | 'stale' | 'unknown' | 'invalid';
-  if (verdicts.length === 0 && policy.requireDependencies) {
+  if (verdicts.length === 0) {
+    // Dependency omission (spec §47): no declared dependencies means no
+    // evidence about the world -> UNKNOWN, fail closed. A policy that
+    // genuinely needs no state must not sit behind a freshness strategy.
     basis = 'unknown';
   } else if (invalid.length > 0) {
     basis = 'invalid';
-  } else if (unknown.length > 0 || (verdicts.length === 0 && revalidated === false && policy.requireDependencies)) {
+  } else if (unknown.length > 0) {
     basis = 'unknown';
   } else if (stale.length > 0) {
     basis = 'stale';
   } else if (aging.length > 0) {
     basis = 'aging';
-  } else if (verdicts.length > 0 && verdicts.every((v) => v.staleness === 'FRESH')) {
-    basis = 'fresh';
   } else {
-    // No dependencies declared and policy does not require them: the decision
-    // rests on preconditions only. Treat as fresh if policy has none.
     basis = 'fresh';
   }
 
   let outcome: OutcomeDecision;
   if (basis === 'aging') {
     const configured = policy.outcomes.aging ?? defaults.outcomes.aging;
-    outcome = configured ?? defaultAgingOutcome(risk);
+    outcome = configured ?? defaultAgingOutcome(risk ?? 'MEDIUM');
   } else {
     outcome = outcomeFor(policy, defaults, basis);
   }
@@ -185,7 +188,7 @@ function explainDecision(
   policy: ResolvedPolicy,
   intent: ActionIntent,
   verdicts: readonly DependencyVerdict[],
-  risk: RiskLevel,
+  risk: RiskLevel | null,
 ): string {
   const policyNote = `policy "${policy.name}"`;
   const evidence = verdicts

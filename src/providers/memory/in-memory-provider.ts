@@ -3,10 +3,9 @@
  *
  * A real StateProvider implementation backed by mutable local state. It
  * exists for tests, examples, policy-test fixtures, and offline simulation.
- * It is NOT a placeholder: it fully implements the provider contract,
- * including version bumping, conditional verification, and provenance.
- * It is never used to enforce decisions in production paths unless an
- * operator explicitly configures it.
+ * It fully implements the provider contract, including version bumping,
+ * conditional verification, and provenance. It is never used to enforce
+ * decisions in production paths unless an operator explicitly configures it.
  */
 
 import type { StateProvider } from '../types.js';
@@ -57,13 +56,22 @@ export class InMemoryStateProvider implements StateProvider {
     return true;
   }
 
-  /** Registers or replaces a resource. Initial version: v1. */
-  put(resource: string, resourceId: string, metadata: Record<string, unknown>, updatedAtIso: string): void {
+  /**
+   * Registers or replaces a resource. When `version` is omitted a monotonic
+   * v-counter is used; fixtures and tests may pin explicit versions.
+   */
+  put(
+    resource: string,
+    resourceId: string,
+    metadata: Record<string, unknown>,
+    updatedAtIso: string,
+    version?: string,
+  ): void {
     const key = this.key(resource, resourceId);
     const existing = this.resources.get(key);
     this.versionCounter += 1;
     this.resources.set(key, {
-      version: existing ? existing.version : `v${this.versionCounter}`,
+      version: version ?? (existing ? existing.version : `v${this.versionCounter}`),
       metadata,
       updated_at: updatedAtIso,
       supports_conditional: existing?.supports_conditional ?? true,

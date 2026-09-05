@@ -85,26 +85,37 @@ export class HttpStateProvider implements StateProvider {
     });
 
     if (response.status === 304) {
-      // The provider affirmed the resource is unchanged since the agent's
-      // version: fresh verification without a body (provenance: conditional_304).
-      const provenance: StateProvenance = {
-        provider: this.name,
-        retrieved_at: nowIso,
-        time_source: 'client',
-        validation_method: 'conditional_304',
-      };
-      return {
-        snapshot_id: newId(ID_PREFIXES.snapshot, Date.parse(nowIso)),
-        source: ref.source,
-        resource: ref.resource,
-        resource_id: ref.resource_id,
-        observed_at: ref.observed_at ?? nowIso,
-        version: ref.version,
-        content_hash: ref.content_hash,
-        metadata: ref.metadata,
-        provenance,
-        unchanged_since_observed: true,
-      };
+      // A 304 carries no body. If the configuration maps metadata fields
+      // (needed for precondition evaluation) and the agent did not declare
+      // them, fall back to a full fetch: preconditions must be verified
+      // against real current state, not assumed.
+      const configuredPaths = Object.keys(config.metadata_paths ?? {});
+      const metadataUsable =
+        configuredPaths.length === 0 ||
+        configuredPaths.every((key) =>
+          Object.prototype.hasOwnProperty.call(ref.metadata ?? {}, key),
+        );
+      if (metadataUsable) {
+        const provenance: StateProvenance = {
+          provider: this.name,
+          retrieved_at: nowIso,
+          time_source: 'client',
+          validation_method: 'conditional_304',
+        };
+        return {
+          snapshot_id: newId(ID_PREFIXES.snapshot, Date.parse(nowIso)),
+          source: ref.source,
+          resource: ref.resource,
+          resource_id: ref.resource_id,
+          observed_at: ref.observed_at ?? nowIso,
+          version: ref.version,
+          content_hash: ref.content_hash,
+          metadata: ref.metadata,
+          provenance,
+          unchanged_since_observed: true,
+        };
+      }
+      return this.getState(ref, nowIso);
     }
     if (response.ok) {
       const bodyText = await response.text();
@@ -206,10 +217,12 @@ function normalizeTimestamp(raw: unknown, format: 'iso' | 'epoch_s' | 'epoch_ms'
   return new Date(parsed).toISOString();
 }
 
-/** Resolves a dot path like "deployment.status" or "items.0.state". */
+/** Resolves a dot path like "deployment.status" or "items.0.state"; a leading "$." (JSONPath style) is tolerated. */
 export function jsonPathValue(body: unknown, path: string): unknown {
+  const normalized = path.startsWith('$.') ? path.slice(2) : path === '$' ? '' : path;
+  if (normalized.length === 0) return body;
   let current: unknown = body;
-  for (const segment of path.split('.')) {
+  for (const segment of normalized.split('.')) {
     if (current === null || typeof current !== 'object') return null;
     current = (current as Record<string, unknown>)[segment];
     if (current === undefined) return null;

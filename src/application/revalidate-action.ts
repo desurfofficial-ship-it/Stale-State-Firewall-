@@ -43,13 +43,15 @@ export function recomputeVerdictsFromCurrentState(params: {
     }
 
     // Adopt the firewall's fresh observation as the new decision basis.
+    // For TTL purposes the relevant timestamp is the FETCH time (provenance),
+    // because the firewall just verified the world looks like this now.
     const adopted = {
       source: verdict.dependency.source,
       resource: verdict.dependency.resource,
       resource_id: verdict.dependency.resource_id,
       version: snapshot.version,
       content_hash: snapshot.content_hash,
-      observed_at: snapshot.observed_at,
+      observed_at: snapshot.provenance.retrieved_at,
       metadata: snapshot.metadata,
     };
 

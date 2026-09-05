@@ -67,6 +67,7 @@ export function createProtectedTool<I, O>(
     return { ...intent, tool: intent.tool ?? spec.name };
   };
 
+
   const executorFor = (input: I): ActionExecutor => ({
     idempotency: idempotencyOf(input),
     atomicity: spec.atomicity,

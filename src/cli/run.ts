@@ -392,7 +392,7 @@ async function cmdPolicyTest(io: CliIo, flags: Map<string, string | boolean>): P
     try {
       for (const test of tests) {
         for (const fixture of test.state) {
-          memory.put(fixture.resource, fixture.resource_id, fixture.metadata, fixture.updated_at ?? new Date(0).toISOString());
+          memory.put(fixture.resource, fixture.resource_id, fixture.metadata, fixture.updated_at ?? new Date(0).toISOString(), fixture.version);
         }
         const intent: ActionIntentInput = {
           agent_id: test.action.agent_id ?? 'policy-test',
@@ -446,7 +446,7 @@ async function cmdPolicyTest(io: CliIo, flags: Map<string, string | boolean>): P
 }
 
 async function cmdState(io: CliIo, sub: string[], flags: Map<string, string | boolean>): Promise<CliResult> {
-  const refArg = sub[0];
+  const refArg = sub[1];
   if (!refArg) {
     io.err('usage: ssf state inspect <source:resource/resource_id>');
     return { exitCode: 2 };
@@ -486,7 +486,7 @@ async function cmdState(io: CliIo, sub: string[], flags: Map<string, string | bo
 }
 
 async function cmdAction(io: CliIo, sub: string[], flags: Map<string, string | boolean>): Promise<CliResult> {
-  const actionId = sub[0];
+  const actionId = sub[1];
   if (!actionId) {
     io.err('usage: ssf action inspect <action_id>');
     return { exitCode: 2 };

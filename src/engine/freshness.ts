@@ -148,14 +148,19 @@ function evaluateTtl(
       maxAgeMs: freshness.maxAgeMs ?? null,
     };
   }
-  const staleness = classifyByAge(ageMs, freshness.maxAgeMs ?? DEFAULT_MAX_AGE_MS, freshness.agingThreshold);
+  const maxAge = freshness.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
+  // Clock-skew tolerance (spec §27) explicitly widens the age boundaries:
+  // effectiveAge = age - skew, floored at zero. Default skew is 0 (conservative).
+  const effectiveAge = Math.max(0, ageMs - freshness.skewToleranceMs);
+  const staleness = classifyByAge(effectiveAge, maxAge, freshness.agingThreshold);
+  const skewNote = freshness.skewToleranceMs > 0 ? ` (skew tolerance ${freshness.skewToleranceMs}ms applied)` : '';
   const reason =
     staleness === 'FRESH'
-      ? `observation is ${ageMs}ms old, within the freshness window of ${freshness.maxAgeMs}ms`
+      ? `observation is ${ageMs}ms old, within the freshness window of ${maxAge}ms${skewNote}`
       : staleness === 'AGING'
-        ? `observation is ${ageMs}ms old, approaching the freshness boundary of ${freshness.maxAgeMs}ms`
-        : `observation is ${ageMs}ms old, exceeding the freshness requirement of ${freshness.maxAgeMs}ms`;
-  return { staleness, reason, preconditions: preconditionResults, ageMs, maxAgeMs: freshness.maxAgeMs };
+        ? `observation is ${ageMs}ms old, approaching the freshness boundary of ${maxAge}ms${skewNote}`
+        : `observation is ${ageMs}ms old, exceeding the freshness requirement of ${maxAge}ms${skewNote}`;
+  return { staleness, reason, preconditions: preconditionResults, ageMs, maxAgeMs: maxAge };
 }
 
 function evaluateVersion(

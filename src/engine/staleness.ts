@@ -78,11 +78,11 @@ export function assessAge(
  * UNKNOWN; this function only classifies known ages.
  */
 export function classifyByAge(ageMs: number, maxAgeMs: number, agingThreshold: number): StalenessClass {
-  if (ageMs <= agingThreshold * maxAgeMs) {
-    return 'FRESH';
+  if (ageMs >= maxAgeMs) {
+    return 'STALE';
   }
-  if (ageMs <= maxAgeMs) {
+  if (ageMs > agingThreshold * maxAgeMs) {
     return 'AGING';
   }
-  return 'STALE';
+  return 'FRESH';
 }

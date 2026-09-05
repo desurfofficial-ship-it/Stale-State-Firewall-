@@ -398,7 +398,7 @@ function validateHttpResource(path: string, resource: unknown, out: PolicyViolat
 }
 
 function validateProviders(path: string, providers: unknown, out: PolicyViolation[]): void {
-  if (providers === undefined) return;
+  if (providers === undefined || providers === null) return;
   if (!isRecord(providers)) {
     out.push(v(path, 'providers must be an object'));
     return;
@@ -587,6 +587,26 @@ export function validateConfig(config: FirewallRootConfigFile): PolicyViolation[
         out.push(v(`$.actions[${i}].name`, `duplicate policy name "${name}"`));
       }
       names.add(name);
+    }
+  });
+
+  // Ambiguous resolution guard: structurally identical matchers would make
+  // precedence depend on declaration order alone; reject them (spec §32).
+  const matcherSignatures = new Map<string, string>();
+  policies.forEach((policy, i) => {
+    const p = policy as FirewallPolicyConfig;
+    if (p?.match === undefined || typeof p.name !== 'string') return;
+    const signature = JSON.stringify(p.match);
+    const previous = matcherSignatures.get(signature);
+    if (previous !== undefined) {
+      out.push(
+        v(
+          `$.actions[${i}].match`,
+          `structurally identical matchers in "${previous}" and "${p.name}" make resolution ambiguous; narrow one of them`,
+        ),
+      );
+    } else {
+      matcherSignatures.set(signature, p.name);
     }
   });
 

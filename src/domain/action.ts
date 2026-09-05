@@ -59,8 +59,8 @@ export interface Precondition {
 export interface ActionIntentInput {
   /** Stable identifier of the acting agent. */
   agent_id: string;
-  /** Tool boundary the action targets, e.g. "github". */
-  tool: string;
+  /** Tool boundary the action targets; ProtectedTool fills this from the tool name. */
+  tool?: string;
   /** Operation name, e.g. "merge_pull_request". */
   operation: string;
   /** Human-readable target, e.g. "org/repo#42". */
@@ -90,7 +90,8 @@ export interface ActionIntent {
   arguments: Record<string, unknown>;
   dependencies: StateDependency[];
   preconditions: Precondition[];
-  risk_level: RiskLevel;
+  /** Null until the resolver assigns it: intent > policy > risk-defaults. */
+  risk_level: RiskLevel | null;
   policy_name: string | null;
   created_at: string;
   execution_deadline_ms: number;

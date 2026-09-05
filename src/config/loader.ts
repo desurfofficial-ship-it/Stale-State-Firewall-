@@ -17,8 +17,9 @@ import type {
 import type { FirewallPolicyConfig, RiskDefaultsConfig, OutcomeDecision } from '../domain/policy.js';
 import { PolicyValidationError } from '../domain/errors.js';
 import { validateConfig, validatePolicyConfig } from './validation.js';
+import { normalizeConfigFile, normalizePolicies } from './normalize.js';
 import type { ResolvedPolicy, GlobalDefaults, ResolvedDependencyRule } from '../engine/resolved-policy.js';
-import { resolveFreshness, resolveExecutionPolicy, buildDefaultFreshness } from '../engine/resolved-policy.js';
+import { resolveFreshness, resolveExecutionPolicy, buildDefaultFreshness, DEFAULT_MAX_AGE_MS } from '../engine/resolved-policy.js';
 
 function readConfigFile(path: string): unknown {
   let text: string;
@@ -50,40 +51,39 @@ export interface LoadedConfig {
 
 export function loadConfigFile(configPath: string): LoadedConfig {
   const absolute = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath);
-  const raw = readConfigFile(absolute);
+  const raw = normalizeConfigFile(readConfigFile(absolute) as FirewallRootConfigFile);
 
-  const violations = validateConfig(raw as FirewallRootConfigFile);
+  const violations = validateConfig(raw);
   if (violations.length > 0) {
     throw new PolicyValidationError(violations);
   }
 
-  const file = raw as FirewallRootConfigFile;
+  const file = raw;
   let policies: FirewallPolicyConfig[] = [...(file.actions ?? [])];
 
   if (file.policies_file !== undefined) {
     const policiesPath = isAbsolute(file.policies_file)
       ? file.policies_file
       : join(dirname(absolute), file.policies_file);
-    const policiesRaw = readConfigFile(policiesPath);
-    if (policiesRaw === null || typeof policiesRaw !== 'object' || !Array.isArray((policiesRaw as PoliciesFile).policies)) {
+    const policiesRaw = readConfigFile(policiesPath) as PoliciesFile | null;
+    if (policiesRaw === null || typeof policiesRaw !== 'object' || !Array.isArray(policiesRaw.policies)) {
       throw new PolicyValidationError([
         { path: '$.policies_file', message: `policies file "${policiesPath}" must contain a "policies" array` },
       ]);
     }
-    const policiesFile = policiesRaw as PoliciesFile;
-    if (policiesFile.schema_version !== undefined && policiesFile.schema_version !== '1') {
+    if (policiesRaw.schema_version !== undefined && policiesRaw.schema_version !== '1') {
       throw new PolicyValidationError([
-        { path: 'schema_version', message: `unsupported policy schema version "${policiesFile.schema_version}"; this build understands "1"` },
+        { path: 'schema_version', message: `unsupported policy schema version "${policiesRaw.schema_version}"; this build understands "1"` },
       ]);
     }
     const externalViolations: ReturnType<typeof validateConfig> = [];
-    policiesFile.policies.forEach((policy, i) => {
+    policiesRaw.policies.forEach((policy, i) => {
       validatePolicyConfig(`policies[${i}]`, policy, externalViolations);
     });
     if (externalViolations.length > 0) {
       throw new PolicyValidationError(externalViolations);
     }
-    policies = [...policies, ...policiesFile.policies];
+    policies = [...policies, ...normalizePolicies(policiesRaw.policies)];
   }
 
   const riskDefaults: RiskDefaultsConfig | null = file.risk_defaults
@@ -123,13 +123,14 @@ export function resolveGlobalDefaults(file: FirewallRootConfigFile): GlobalDefau
 
 /** Converts a validated policy config into its runtime form. */
 export function resolvePolicyConfig(policy: FirewallPolicyConfig, declarationIndex: number): ResolvedPolicy {
+  const freshnessConfig = policy.freshness ?? { strategy: 'ttl' as const, max_age: DEFAULT_MAX_AGE_MS };
   return {
     name: policy.name,
     description: policy.description ?? null,
     declarationIndex,
     matcher: policy.match,
     declaredRisk: policy.risk ?? null,
-    freshness: resolveFreshness(policy.freshness, undefined, undefined, `policy "${policy.name}".freshness`),
+    freshness: resolveFreshness(freshnessConfig, undefined, undefined, `policy "${policy.name}".freshness`),
     preconditions: policy.preconditions ?? [],
     requireDependencies: policy.require_dependencies ?? false,
     dependencyRules: (policy.dependency_freshness ?? []).map(

@@ -30,7 +30,7 @@ export interface GitHubProviderOptions {
   apiBase: string;
   timeoutMs: number;
   includeReviews: boolean;
-  /** Injectable fetch (tests run a fake GitHub API); defaults to global fetch. */
+  /** Injectable fetch (tests run a simulated GitHub API); defaults to global fetch. */
   fetchImpl?: typeof fetch;
   token?: string;
 }
