@@ -12,9 +12,17 @@
  * executors may retry when the policy explicitly allows it (spec §25).
  */
 
-import type { ActionExecutor, ActionIntent, ExecutionResult, Precondition } from '../domain/action.js';
+import type {
+  ActionExecutor,
+  ActionIntent,
+  ConditionalExecutionResult,
+  ExecutionResult,
+  ExpectedStateEntry,
+  Precondition,
+} from '../domain/action.js';
 import type { DecisionRecord } from '../domain/decision.js';
 import type { AuthorizationRecord } from '../storage/types.js';
+import type { StateSnapshot } from '../domain/state.js';
 import { ActionExpiredError, ReplayDetectedError, EscalationPendingError, UnauthorizedActionError } from '../domain/errors.js';
 import type { FirewallContext } from './context.js';
 import {
@@ -29,7 +37,7 @@ import { recomputeVerdictsFromCurrentState } from './revalidate-action.js';
 import { evaluateDependencies, routePreconditions } from '../engine/dependency-evaluator.js';
 import { decide } from '../engine/decision-engine.js';
 import { resolveDependencyFreshness } from '../engine/policy-resolver.js';
-import { defaultDeadlineForRisk } from '../engine/resolved-policy.js';
+import { defaultDeadlineForRisk, type ResolvedPolicy } from '../engine/resolved-policy.js';
 import { newId, ID_PREFIXES } from '../domain/identifiers.js';
 import { refKey } from '../domain/state.js';
 import { redactDeep } from '../redaction/redact.js';
@@ -221,6 +229,96 @@ export async function executeAction(
   // The claim is atomic: if a live (unconsumed) authorization already exists
   // for this action id, the claim is refused. This closes the check-then-insert
   // window that two concurrent executions could otherwise both pass.
+  //
+  // The authorization binds the action to the EXACT state identity it was
+  // granted against (milestone: atomic effect assurance): one expected-state
+  // entry per validated dependency. Conditional executors forward these
+  // entries to the external system so THAT system rejects the operation when
+  // the authorized state is no longer true.
+  const expectedState = buildExpectedState(validation.snapshots);
+  const executorConditional =
+    typeof executor.conditionalExecutionSupported === 'function' &&
+    executor.conditionalExecutionSupported() === true &&
+    typeof executor.conditionalExecute === 'function';
+  const conditionalExecutionAvailable = executorConditional && expectedState.length > 0;
+
+  // ---- Policy gate: conditional execution required but unenforceable ------
+  // A policy that demands provider-enforced conditional execution must not
+  // silently fall back to best-effort pre-execution verification. A human
+  // approval cannot give a provider compare-and-swap semantics, so the
+  // default outcome is DENY (fail closed), not ESCALATE. In OBSERVE mode the
+  // gate outcome is recorded without blocking; approved escalations
+  // (viaApproval) proceed under the documented best-effort guarantee.
+  if (
+    policy.execution.requireConditionalExecution === true &&
+    !conditionalExecutionAvailable &&
+    options.viaApproval !== true
+  ) {
+    const outcomeDecision = policy.execution.onConditionalUnavailable ?? 'deny';
+    const gateDecision =
+      outcomeDecision === 'revalidate' ? 'REVALIDATE' : outcomeDecision === 'escalate' ? 'ESCALATE' : 'DENY';
+    const deadlineMsUnavailable = policy.execution.deadlineMs ?? defaultDeadlineForRisk(intent.risk_level ?? 'MEDIUM');
+    const blockedRecord = buildDecisionRecord({
+      ctx,
+      intent,
+      policy,
+      decision: gateDecision,
+      reason:
+        `policy "${policy.name}" requires provider-side conditional execution, but the executor cannot enforce ` +
+        `the authorized expected state at the external system for this action (provider capability: ` +
+        `${conditionalCapabilityOf(ctx.providers, intent)}); failing closed with outcome ${gateDecision}`,
+      verdicts: validation.decision.verdicts,
+      deadlineMs: deadlineMsUnavailable,
+      revalidated: false,
+      computedAt: ctx.clock.nowMs(),
+    });
+    if (ctx.mode === 'OBSERVE') {
+      // OBSERVE mode never blocks: record the gate outcome and proceed.
+      blockedRecord.would_have_decided = blockedRecord.decision;
+      blockedRecord.decision = 'ALLOW';
+      blockedRecord.reason = `OBSERVE mode: decision recorded without blocking. ${blockedRecord.reason}`;
+      await ctx.store.saveDecision(blockedRecord);
+      ctx.audit.append('action.blocked', {
+        action_id: intent.action_id,
+        decision: 'ALLOW',
+        would_have: blockedRecord.would_have_decided,
+        reason: blockedRecord.reason,
+        execution_status: 'not_executed',
+        stage: 'conditional_execution_unavailable',
+        note: 'OBSERVE mode: the conditional-execution gate outcome is recorded without blocking',
+      });
+    } else if (gateDecision === 'ESCALATE') {
+      // The escalation references this decision record; it must be persisted.
+      await ctx.store.saveDecision(blockedRecord);
+      await ctx.store.saveEscalation({
+        action_id: intent.action_id,
+        decision_id: blockedRecord.decision_id,
+        status: 'PENDING',
+        requested_at: ctx.clock.nowIso(),
+        resolved_at: null,
+        resolved_by: null,
+        resolution_note: null,
+      });
+      ctx.metrics.increment('escalations_requested');
+      ctx.audit.append('action.escalation_requested', {
+        action_id: intent.action_id,
+        decision: 'ESCALATE',
+        reason: blockedRecord.reason,
+      });
+      return { decision: blockedRecord, executed: false, result: null, revalidatedDecision };
+    } else {
+      await ctx.store.saveDecision(blockedRecord);
+      ctx.audit.append('action.blocked', {
+        action_id: intent.action_id,
+        decision: gateDecision,
+        reason: blockedRecord.reason,
+        execution_status: 'blocked',
+        stage: 'conditional_execution_unavailable',
+      });
+      return { decision: blockedRecord, executed: false, result: null, revalidatedDecision };
+    }
+  }
+
   const deadlineMs = policy.execution.deadlineMs ?? defaultDeadlineForRisk(intent.risk_level ?? 'MEDIUM');
   const nowMs = ctx.clock.nowMs();
   const expiresAt = new Date(nowMs + deadlineMs).toISOString();
@@ -230,6 +328,7 @@ export async function executeAction(
     authorized_at: decision.created_at,
     expires_at: expiresAt,
     state_fingerprint: validation.stateFingerprint,
+    expected_state: conditionalExecutionAvailable ? expectedState : null,
     consumed_at: null,
     policy_version: ctx.policyVersion,
   };
@@ -243,6 +342,25 @@ export async function executeAction(
     });
     throw new ReplayDetectedError(intent.action_id, {
       authorized_at: claim.existing?.authorized_at ?? null,
+    });
+  }
+
+  // ---- Provider-enforced conditional execution -----------------------------
+  // When the executor can enforce the authorized expected state at the
+  // external system, the condition is checked ATOMICALLY BY THE PROVIDER at
+  // the moment of mutation. This REPLACES the fetch-compare re-check below:
+  // a pre-execution read cannot close the compare -> execute window, while a
+  // provider-side compare-and-swap eliminates it (milestone §28: no
+  // redundant verification where provider semantics make it safe).
+  if (conditionalExecutionAvailable) {
+    return executeConditionally(ctx, {
+      intent,
+      executor,
+      policy,
+      decision,
+      revalidatedDecision,
+      expectedState,
+      deadlineMs,
     });
   }
 
@@ -460,6 +578,319 @@ export async function executeApprovedAction(
 
 function routeAll(preconditions: Precondition[], intent: ActionIntent): Precondition[][] {
   return intent.dependencies.map((dep, index) => routePreconditions(preconditions, index, dep));
+}
+
+/** The per-dependency authorized state identity captured at validation time. */
+function buildExpectedState(snapshots: readonly StateSnapshot[]): ExpectedStateEntry[] {
+  return snapshots.map((s) => ({
+    ref: refKey(s),
+    version: s.version,
+    content_hash: s.content_hash,
+  }));
+}
+
+/** Human-auditable summary of the conditional-execution capability of the providers behind an intent. */
+function conditionalCapabilityOf(providers: FirewallContext['providers'], intent: ActionIntent): string {
+  const capabilities = intent.dependencies.map((dep) => {
+    const provider = providers.find((p) => p.supports(dep));
+    if (!provider) return `${refKey(dep)}: no provider`;
+    if (provider.supportsConditionalExecution?.() === true) return `${refKey(dep)}: conditional_supported`;
+    if (provider.supportsConditionalVerification?.() === true) return `${refKey(dep)}: best_effort_verification_only`;
+    return `${refKey(dep)}: unsupported`;
+  });
+  return capabilities.join(', ') || 'no dependencies declared';
+}
+
+interface ConditionalExecutionParams {
+  intent: ActionIntent;
+  executor: ActionExecutor;
+  policy: ResolvedPolicy;
+  decision: DecisionRecord;
+  revalidatedDecision: DecisionRecord | null;
+  expectedState: ExpectedStateEntry[];
+  deadlineMs: number;
+}
+
+/**
+ * Executes the action through the executor's conditional path: the external
+ * system itself enforces "only execute if state == authorized state".
+ *
+ * Outcome mapping (milestone §9, §10, §22):
+ * - condition satisfied -> executed under a provider-enforced condition;
+ *   atomicity is recorded as guaranteed.
+ * - condition failed -> the provider REFUSED the stale operation. The
+ *   authorization is invalidated; a completely fresh decision is computed
+ *   from current state and recorded. The old authorization is never
+ *   inherited and the operation is never blindly retried.
+ * - condition unavailable -> the executor could not enforce the expected
+ *   state for its effect: fail closed, nothing executes.
+ * - provider crash/timeout -> execution failure with UNKNOWN condition
+ *   outcome; never recorded as success.
+ */
+async function executeConditionally(
+  ctx: FirewallContext,
+  params: ConditionalExecutionParams,
+): Promise<ExecutionOutcome> {
+  const { intent, executor, policy, decision, revalidatedDecision, expectedState, deadlineMs } = params;
+  const executionId = newId(ID_PREFIXES.execution, ctx.clock.nowMs());
+  const startedAt = ctx.clock.nowIso();
+  const startMs = ctx.clock.nowMs();
+  const expectedStateForAudit = expectedState.map(({ ref, version }) => ({ ref, version }));
+
+  let conditional: ConditionalExecutionResult;
+  try {
+    conditional = await Promise.race([
+      executor.conditionalExecute!(intent, expectedState),
+      deadlineRace(startMs + deadlineMs, intent.action_id, deadlineMs),
+    ]);
+  } catch (error) {
+    // The conditional operation did not complete: the condition outcome is
+    // UNKNOWN (the side effect may or may not have been applied). Record a
+    // failure — never success — and consume the authorization.
+    const finishedAt = ctx.clock.nowIso();
+    const failed: ExecutionResult = {
+      execution_id: executionId,
+      action_id: intent.action_id,
+      success: false,
+      idempotency: executor.idempotency,
+      error: error instanceof Error ? error.message : String(error),
+      started_at: startedAt,
+      finished_at: finishedAt,
+      duration_ms: ctx.clock.nowMs() - startMs,
+      atomicity: executor.atomicity ?? 'not_guaranteed',
+      expected_state: expectedStateForAudit,
+    };
+    await ctx.store.saveExecution(failed);
+    await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
+    ctx.audit.append('action.failed', {
+      action_id: intent.action_id,
+      agent_id: intent.agent_id,
+      tool: intent.tool,
+      operation: intent.operation,
+      target: intent.target,
+      decision: decision.decision,
+      execution_status: 'failed',
+      reason: failed.error,
+      latency_ms: failed.duration_ms,
+      atomicity: failed.atomicity,
+      conditional_execution: 'not_attempted',
+      expected_state: expectedStateForAudit,
+      decision_ref: decision.decision_id,
+      note: failed.error?.includes('deadline') === true
+        ? 'the side effect may still have been performed by the executor; atomicity is not guaranteed'
+        : 'the conditional operation did not complete; whether the provider evaluated the condition is unknown',
+    });
+    return { decision, executed: true, result: failed, revalidatedDecision };
+  }
+
+  // ---- CONDITION_FAILED: the external world moved after authorization ------
+  // The provider correctly refused to execute the stale operation. This is
+  // not an internal error and not a retryable failure: the authorization is
+  // invalidated and a NEW decision is computed from CURRENT state. The new
+  // state never inherits the old authorization (milestone §10).
+  if (conditional.condition === 'failed') {
+    const finishedAt = ctx.clock.nowIso();
+    const rejected: ExecutionResult = {
+      execution_id: executionId,
+      action_id: intent.action_id,
+      success: false,
+      idempotency: executor.idempotency,
+      error:
+        conditional.error ??
+        'conditional execution rejected by the provider: authoritative state no longer matches the authorized expected state',
+      started_at: startedAt,
+      finished_at: finishedAt,
+      duration_ms: ctx.clock.nowMs() - startMs,
+      // The condition was provider-enforced; the provider held the line.
+      atomicity: 'guaranteed',
+      conditional_execution: 'failed',
+      expected_state: expectedStateForAudit,
+      observed_version: conditional.observed_version,
+    };
+    await ctx.store.saveExecution(rejected);
+    await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
+    ctx.metrics.increment('conditional_executions_failed');
+    ctx.audit.append('execution.condition_failed', {
+      action_id: intent.action_id,
+      agent_id: intent.agent_id,
+      tool: intent.tool,
+      operation: intent.operation,
+      target: intent.target,
+      decision: decision.decision,
+      execution_status: 'failed',
+      conditional_execution: 'failed',
+      expected_state: expectedStateForAudit,
+      observed_version: conditional.observed_version,
+      provider: executorProviderName(ctx, intent) ?? undefined,
+      decision_ref: decision.decision_id,
+      reason: 'provider refused the operation: the authorized state changed between authorization and execution',
+    });
+
+    // Recompute dependencies, preconditions, and policy against CURRENT
+    // state, producing a NEW decision for the audit trail and for the
+    // caller's next step. Nothing executes here regardless of the outcome.
+    const fresh = await evaluateDependencies({
+      dependencies: intent.dependencies,
+      policyFreshness: policy.freshness,
+      resolveDependencyFreshness: (dep) => resolveDependencyFreshness(policy, dep, policy.freshness),
+      preconditions: collectPreconditions(policy, intent),
+      providers: ctx.providers,
+      nowMs: ctx.clock.nowMs(),
+      nowIso: ctx.clock.nowIso(),
+      events: ctx.events,
+    });
+    for (const snapshot of fresh.fetched) {
+      await ctx.store.saveSnapshot(snapshot);
+    }
+    const recomputedVerdicts = recomputeVerdictsFromCurrentState({
+      originalVerdicts: decision.verdicts,
+      fetched: fresh.fetched,
+      routedPreconditions: routeAll(collectPreconditions(policy, intent), intent),
+      resolveDependencyFreshness: (index) => {
+        const dep = intent.dependencies[index];
+        return dep ? resolveDependencyFreshness(policy, dep, policy.freshness) : policy.freshness;
+      },
+      nowMs: ctx.clock.nowMs(),
+    });
+    const output = decide({
+      intent,
+      policy,
+      defaults: ctx.defaults,
+      verdicts: recomputedVerdicts,
+      mode: ctx.mode,
+      revalidated: true,
+    });
+    const freshDecision = buildDecisionRecord({
+      ctx,
+      intent,
+      policy,
+      decision: output.decision,
+      reason:
+        'conditional execution was rejected by the provider (authorized state changed between authorization and execution); ' +
+        `the authorization was invalidated and a fresh decision was computed from current state. ${output.reason}`,
+      verdicts: recomputedVerdicts,
+      deadlineMs,
+      revalidated: true,
+      computedAt: ctx.clock.nowMs(),
+      execution: redactExecutionForRecord(rejected),
+    });
+    if (ctx.mode === 'OBSERVE' && freshDecision.decision !== 'ALLOW') {
+      freshDecision.would_have_decided = freshDecision.decision;
+      freshDecision.decision = 'ALLOW';
+      freshDecision.reason = `OBSERVE mode: decision recorded without blocking. ${freshDecision.reason}`;
+    }
+    await ctx.store.saveDecision(freshDecision);
+    ctx.audit.append('action.blocked', {
+      action_id: intent.action_id,
+      decision: freshDecision.decision,
+      reason: freshDecision.reason,
+      execution_status: 'blocked',
+      stage: 'condition_failed_revalidation',
+      conditional_execution: 'failed',
+      expected_state: expectedStateForAudit,
+      observed_version: conditional.observed_version,
+      decision_ref: decision.decision_id,
+    });
+    return { decision: freshDecision, executed: false, result: rejected, revalidatedDecision };
+  }
+
+  // ---- UNAVAILABLE: the executor could not enforce the condition -----------
+  // Failing closed is the only safe outcome: the TOCTOU re-check was
+  // replaced by the (now absent) provider-enforced condition, so a fallback
+  // to unconditional execution would run with NO verification at all.
+  if (conditional.condition === 'unavailable') {
+    const finishedAt = ctx.clock.nowIso();
+    const refused: ExecutionResult = {
+      execution_id: executionId,
+      action_id: intent.action_id,
+      success: false,
+      idempotency: executor.idempotency,
+      error:
+        conditional.error ??
+        'conditional execution refused: the executor could not enforce the authorized expected state for this action',
+      started_at: startedAt,
+      finished_at: finishedAt,
+      duration_ms: ctx.clock.nowMs() - startMs,
+      atomicity: 'not_guaranteed',
+      conditional_execution: 'unavailable',
+      expected_state: expectedStateForAudit,
+    };
+    await ctx.store.saveExecution(refused);
+    await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
+    ctx.audit.append('action.blocked', {
+      action_id: intent.action_id,
+      agent_id: intent.agent_id,
+      tool: intent.tool,
+      operation: intent.operation,
+      target: intent.target,
+      decision: decision.decision,
+      execution_status: 'blocked',
+      stage: 'conditional_execution_unavailable',
+      conditional_execution: 'unavailable',
+      expected_state: expectedStateForAudit,
+      decision_ref: decision.decision_id,
+      reason: 'executor could not enforce the authorized expected state; failing closed without executing',
+    });
+    return { decision, executed: false, result: refused, revalidatedDecision };
+  }
+
+  // ---- SATISFIED: the provider enforced the condition and it held ----------
+  const finishedAt = ctx.clock.nowIso();
+  const result: ExecutionResult = {
+    execution_id: executionId,
+    action_id: intent.action_id,
+    success: conditional.success,
+    idempotency: executor.idempotency,
+    output: conditional.output,
+    error: conditional.error,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: ctx.clock.nowMs() - startMs,
+    atomicity: 'guaranteed',
+    conditional_execution: 'satisfied',
+    expected_state: expectedStateForAudit,
+  };
+
+  // Authorization is consumed exactly once, together with the outcome.
+  // The persisted execution record carries redacted output; the live result
+  // returned to the caller is the executor's own.
+  await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
+  const persistedResult: ExecutionResult = { ...result, output: redactDeep(result.output) };
+  await ctx.store.saveExecution(persistedResult);
+
+  const persistedDecision: DecisionRecord = { ...decision, execution: persistedResult };
+
+  ctx.metrics.increment('conditional_executions_satisfied');
+  ctx.metrics.observeExecutionLatency(result.duration_ms);
+  ctx.audit.append(result.success ? 'action.executed' : 'action.failed', {
+    action_id: intent.action_id,
+    agent_id: intent.agent_id,
+    tool: intent.tool,
+    operation: intent.operation,
+    target: intent.target,
+    decision: decision.decision,
+    execution_status: result.success ? 'executed' : 'failed',
+    latency_ms: result.duration_ms,
+    atomicity: result.atomicity,
+    conditional_execution: 'satisfied',
+    expected_state: expectedStateForAudit,
+    decision_ref: decision.decision_id,
+    reason: result.success
+      ? 'executed under provider-enforced conditional execution: the external system verified the authorized state at the moment of mutation'
+      : conditional.error ?? 'executor reported failure after the condition was satisfied',
+  });
+
+  return { decision: persistedDecision, executed: true, result, revalidatedDecision };
+}
+
+function redactExecutionForRecord(result: ExecutionResult): ExecutionResult {
+  return { ...result, output: redactDeep(result.output) };
+}
+
+function executorProviderName(ctx: FirewallContext, intent: ActionIntent): string | null {
+  const dep = intent.dependencies[0];
+  if (!dep) return null;
+  return ctx.providers.find((p) => p.supports(dep))?.name ?? null;
 }
 
 function deadlineRace(_deadlineAtMs: number, actionId: string, deadlineMs: number): Promise<never> {

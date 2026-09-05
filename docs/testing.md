@@ -60,6 +60,25 @@ Time-of-check/time-of-use with controlled interleaving:
 - check() results never reused across executions (R6)
 - independent firewalls keep independent authorization ledgers (R7)
 
+### Conditional execution (`test/conditional/`)
+
+The atomic-effect-assurance milestone suite (see [atomic-effect-assurance.md](atomic-effect-assurance.md)):
+
+- **critical race (CR1)** — the central proof: authorize against state X, a concurrent actor moves X→Y after authorization, the conditional operation carrying X is **rejected by the provider itself**; no side effect, authorization invalidated, replay refused, fresh decision recorded
+- **same-state success (CR2)** — no mutation ⇒ condition satisfied ⇒ executed with `atomicity: guaranteed`
+- **two-authorization race (CR3)** — two authorized actions CAS the same resource: exactly one executes
+- **drift during validation→authorization (CR4)** — also caught by the CAS
+- **legacy limitation, demonstrated not hidden (CR5)** — without conditional capability the compare→execute window stays open (`atomicity: not_guaranteed`)
+- **binding (CB1/CB2)** — an authorization for resource A cannot drive a CAS on resource B; the provider CAS is ref-scoped
+- **replay × conditional (RP1–RP3)** — condition failure, success, and concurrent claim all consume the single-use authorization
+- **failure injection (FI1–FI4)** — provider crash ≠ condition failure ≠ unavailable; deadline semantics; fail-closed on declared-but-unenforceable capability
+- **audit & observability (AU1–AU3)** — `execution.condition_failed` reconstructs the lifecycle; no ambiguous success; metrics split satisfied/failed
+- **SQLite round-trip (SQ1)** — expected-state binding and condition outcomes survive close/reopen (migration v2)
+- **policy matrix (M1–M12, P1–P6)** — state × capability × risk × outcome matrix and the `require_conditional_execution` gate (including OBSERVE mode and approved escalations)
+- **provider contracts** — simulated GitHub Contents API (stale blob sha ⇒ 409 ⇒ no write; deleted file ⇒ 404; 500 ⇒ error not condition failure) and a live HTTP server (`If-Match` honored: stale ⇒ 412 ⇒ no write; 500 ⇒ provider error)
+- **kill mutations (KM1–KM4)** — removing the CAS check, lying about the condition outcome, or discarding the authorized version for a fresh read each let the canonical attack succeed (proving the suite detects every removal); declared-but-unenforceable capability fails closed
+- **property tests (P-A..P-D)** — randomized version histories: state moved ⇒ never executed; state unchanged ⇒ executed; CAS ref-scoping for arbitrary version pairs
+
 ### Property tests (`test/property/`)
 
 `fast-check` invariants over generated inputs (spec §46):

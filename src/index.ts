@@ -18,6 +18,8 @@ export type {
   ActionIntentInput,
   ActionExecutor,
   ExecutionResult,
+  ExpectedStateEntry,
+  ConditionalExecutionResult,
   Precondition,
   PreconditionOperator,
   PRECONDITION_OPERATORS,
@@ -57,7 +59,11 @@ export type { InMemoryResource, InMemoryMutation } from './providers/memory/in-m
 export { HttpStateProvider } from './providers/http/http-provider.js';
 export { GitHubStateProvider, aggregateReviews } from './providers/github/github-provider.js';
 export type { GitHubProviderOptions } from './providers/github/github-provider.js';
-export type { StateProvider } from './providers/types.js';
+export type {
+  StateProvider,
+  ConditionalMutationRequest,
+  ConditionalMutationResult,
+} from './providers/types.js';
 
 // Configuration
 export { loadConfigFile, resolveGlobalDefaults, resolvePolicyConfig } from './config/loader.js';

@@ -60,7 +60,10 @@ Out of scope: host compromise (an attacker who controls the process or its memor
 ### 9. Concurrent actor
 
 **Attack:** mutate state between observation and use.
-**Defense:** execution-time re-fetch + state fingerprint comparison immediately before the side effect; mismatches block with a TOCTOU-specific reason (race tests R2, R6). The final gap (mutation after the last fetch, before the effect) is not coverable without provider-side compare-and-swap and is recorded as `atomicity: not_guaranteed` — never claimed as safe.
+**Defense:** execution-time re-fetch + state fingerprint comparison immediately before the side effect; mismatches block with a TOCTOU-specific reason (race tests R2, R6). Where the provider supports **conditional execution** (milestone: atomic effect assurance), the defense is strictly stronger: the mutation itself carries the authorized version and the **external system** refuses the operation when its state moved (kill-contrast tests CR1/KM1/KM3 in `test/conditional/`). The final gap (mutation after the last fetch, before the effect) remains only on providers without conditional execution and is recorded as `atomicity: not_guaranteed` — never claimed as safe. Condition failures invalidate the authorization and force a fresh decision; they are never retried under the old authorization (`execution.condition_failed` audit event; replay tests RP1–RP3).
+
+**Attack (conditional-execution specific):** point the conditional mutation at a different resource than the one authorized, or satisfy the condition with a version borrowed from another resource.
+**Defense:** the authorization carries the per-dependency expected state; executors without a matching entry must refuse (`condition: unavailable`, fail closed), and the provider's CAS is ref-scoped — a version from another resource cannot satisfy the condition (binding tests CB1, CB2; property test P-D).
 
 ### 10. Malicious configuration
 
@@ -82,11 +85,12 @@ Out of scope: host compromise (an attacker who controls the process or its memor
 - The process running the firewall is trusted (compromise of the host defeats any in-process boundary).
 - Provider credentials are managed by the operator (environment/secret managers) and are never handled by the agent.
 - Providers expose at least one stable version signal for meaningful freshness guarantees; without one, only TTL/precondition semantics apply and the limits in [limitations.md](limitations.md) apply.
+- Executors declare capabilities honestly (idempotency, atomicity, conditional-execution support) — the same trust model the executor contract has always used. Declared-but-unenforceable conditional capability fails closed (`condition: unavailable`); a hostile executor that discards the authorized expected state and calls the API directly is outside the boundary.
 
 ## Guarantees (summary)
 
-**Strong:** no execution without a decision; critical actions never proceed on UNKNOWN or INVALID; refreshing state never auto-approves; deterministic evaluation; replay-proof authorizations; tamper-evident audit.
+**Strong:** no execution without a decision; critical actions never proceed on UNKNOWN or INVALID; refreshing state never auto-approves; deterministic evaluation; replay-proof authorizations; tamper-evident audit; **provider-enforced conditional execution where supported** — the external operation is conditioned on the exact authorized state, and a condition failure can never become a success or a blind retry.
 
-**Best-effort:** TOCTOU window narrowing (provider-dependent); staleness detection quality bounded by the provider's version signals.
+**Best-effort:** TOCTOU window narrowing on providers without conditional execution; staleness detection quality bounded by the provider's version signals.
 
-**Never claimed:** cross-system transactional consistency; prevention of every race condition.
+**Never claimed:** cross-system transactional consistency; prevention of every race condition on providers that lack conditional mutation mechanisms (see [atomic-effect-assurance.md](atomic-effect-assurance.md) for the capability matrix).

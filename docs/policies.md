@@ -45,6 +45,8 @@ actions:
       deadline: 10s                  # ALLOW validity window
       require_fresh_at_execution: true
       allow_idempotent_retry: false
+      require_conditional_execution: false   # demand provider-enforced CAS
+      on_conditional_unavailable: deny        # deny (default) | revalidate | escalate
 ```
 
 ## Outcome semantics (spec §6)
@@ -57,6 +59,12 @@ actions:
 | `escalate` | Hold for explicit human approval; freshness is still re-verified before execution. |
 
 Defaults: `on_fresh: allow`, `on_stale: revalidate`, `on_unknown: revalidate`, `on_invalid: deny`, `on_aging` derived from risk (allow for LOW/MEDIUM, revalidate for HIGH/CRITICAL).
+
+## Conditional execution policy (milestone: atomic effect assurance)
+
+`require_conditional_execution: true` demands that the executor enforces the authorized expected state at the external system (provider-side compare-and-swap). When the capability is unavailable the action is decided by `on_conditional_unavailable` — **deny** by default, because a human approval cannot give a provider CAS semantics; `revalidate` and `escalate` are configurable. Setting it to `allow` is rejected at config validation as contradictory.
+
+This is evaluated deterministically, like every other policy input: the same capability + same policy ⇒ the same outcome. See [atomic-effect-assurance.md](atomic-effect-assurance.md) for the security model and the provider capability matrix.
 
 ## Precondition operators (spec §11)
 

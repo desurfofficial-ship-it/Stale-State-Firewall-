@@ -14,9 +14,13 @@ Stated precisely, because credibility depends on not overclaiming (spec §72).
 
 ## What is best-effort, and why
 
-### The final TOCTOU gap
+### The final TOCTOU gap — closed where providers support conditional execution, best-effort elsewhere
 
-The firewall re-fetches state immediately before the side effect and blocks on drift. But unless the underlying system enforces compare-and-swap (GitHub's merge API with an expected head SHA, database row versions with conditional UPDATE), a mutation that lands **after the final fetch and before the executor's effect** is invisible to the firewall. Every execution record states `atomicity: guaranteed | not_guaranteed`; the generic default is `not_guaranteed`. Closing this gap fully requires provider-side conditional writes, which is exactly what the executor/`atomicity` field exists to express.
+The firewall re-fetches state immediately before the side effect and blocks on drift. But a pre-execution read cannot close the **compare → execute** window: a mutation that lands after the final fetch and before the executor's effect is invisible to the re-check. Every execution record states `atomicity: guaranteed | not_guaranteed`.
+
+Where the provider supports **conditional execution** (milestone: atomic effect assurance — see [atomic-effect-assurance.md](atomic-effect-assurance.md)), this gap is closed by the external system itself: the mutation carries the authorized version (GitHub Contents API blob sha, HTTP `If-Match`, the in-memory provider's atomic CAS) and the provider refuses the operation when its authoritative state no longer matches. The execution record then states `atomicity: guaranteed` with `conditional_execution: satisfied`, and a provider refusal is recorded as `execution.condition_failed` — never as success, never silently retried.
+
+Where the provider does **not** support it (GitHub resources other than `file`, HTTP endpoints without a verified `If-Match` mutation), the residual window remains and is documented rather than hidden: those executions stay on the best-effort path with `atomicity: not_guaranteed`. Policies can require the stronger guarantee (`execution.require_conditional_execution: true`), which fails closed (default deny) when the capability is unavailable. The firewall does **not** claim universal atomicity across arbitrary external systems.
 
 ### Staleness detection quality is bounded by provider signals
 
@@ -31,10 +35,11 @@ Preconditions evaluate fields the provider surfaces in `metadata`. For the HTTP 
 
 ## Explicit non-guarantees
 
-- **Not** "prevents every race condition". It narrows the TOCTOU window and detects drift at execution time; the residual gap is documented above.
+- **Not** "prevents every race condition". With provider-side conditional execution it eliminates the authorization→execution race for the conditioned resources; everywhere else it narrows the TOCTOU window and detects drift at execution time. See [atomic-effect-assurance.md](atomic-effect-assurance.md) for the exact guarantee boundary.
 - **Not** "guarantees consistency across all external systems". The firewall enforces consistency exactly to the extent the underlying provider and execution mechanism expose it.
 - **Not** protection against a compromised host or process (see threat-model assumptions).
 - **Not** protection against a developer deliberately keeping and calling an unwrapped reference to a raw tool. `protect()` makes the safe path the easy path and refuses duplicate registrations, but it cannot delete other references in your code.
+- **Not** protection against an executor that lies about conditional enforcement or discards the authorized expected state it was handed. The conditional path is fail-closed for declared-but-unenforceable capability, and the audit records what was enforced — but a hostile executor that ignores the binding and calls the API directly is outside the model (the executor is the operator's code; see threat-model assumptions).
 
 ## MVP boundaries (spec §61)
 

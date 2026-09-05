@@ -36,6 +36,16 @@ Examples:
 - CI moved from passing to failing and `ci.state == success` is a precondition → precondition fails against current state → **DENY** (the spec §49 release-agent scenario).
 - Provider outage → state still UNKNOWN after revalidation → **DENY** (fail closed).
 
+## Conditional execution replaces the re-check where providers support it
+
+The pre-execution re-check described above is a best-effort fetch-compare: it narrows the TOCTOU window but cannot close the final compare → execute gap. Where the provider supports conditional execution (milestone: atomic effect assurance), the firewall replaces the redundant re-check with a stronger mechanism: the mutation itself carries the authorized expected state and the external system refuses the operation when its authoritative state no longer matches. See [atomic-effect-assurance.md](atomic-effect-assurance.md).
+
+A provider refusal (`execution.condition_failed`) follows the same philosophy as revalidation, one step stricter:
+
+- the authorization is invalidated immediately,
+- dependencies, preconditions, and policy are recomputed against current state into a NEW decision record,
+- nothing executes automatically, and the new state never inherits the old authorization — the caller must submit a fresh intent (new action id) that goes through the full pipeline again.
+
 ## Escalations
 
 An `ESCALATE` decision holds the action:
@@ -58,9 +68,10 @@ await firewall.resolveEscalation(actionId, {
 
 Time-of-check/time-of-use (spec §13): between validation and the side effect, the world can change. For every execution (default `require_fresh_at_execution: true`):
 
-1. After ALLOW, an **authorization** is recorded with a deadline (`execution.deadline`, 10s default for HIGH/CRITICAL, 60s otherwise) and a **state fingerprint** (hash over each dependency's version + content hash at validation time).
-2. Immediately before the side effect, the firewall **re-fetches** every dependency and recomputes the fingerprint.
-3. Fingerprint mismatch → the action is blocked with an explicit reason (`...state changed between validation and execution (time-of-check/time-of-use protection)...`), recorded as a second decision plus an `action.blocked` audit event with `stage: toctou_recheck`.
+1. After ALLOW, an **authorization** is recorded with a deadline (`execution.deadline`, 10s default for HIGH/CRITICAL, 60s otherwise), a **state fingerprint** (hash over each dependency's version + content hash at validation time), and the per-dependency **expected state** the authorization is bound to.
+2. If the executor supports conditional execution (milestone: atomic effect assurance), the firewall takes the **conditional path**: the mutation carries the authorized expected state and the external system itself refuses a stale operation. The re-fetch below is skipped — the provider-enforced CAS is strictly stronger than another read, so the extra fetch would be redundant.
+3. Otherwise (legacy best-effort path), immediately before the side effect the firewall **re-fetches** every dependency and recomputes the fingerprint. Fingerprint mismatch → the action is blocked with an explicit reason (`...state changed between validation and execution (time-of-check/time-of-use protection)...`), recorded as a second decision plus an `action.blocked` audit event with `stage: toctou_recheck`.
+4. On the conditional path, a provider refusal (`condition failed`) consumes the authorization, records an `execution.condition_failed` audit event, and produces a fresh recomputed decision (`stage: condition_failed_revalidation`). It is never retried under the old authorization.
 
 ## Replay protection (spec §24, §25)
 
@@ -72,4 +83,4 @@ Time-of-check/time-of-use (spec §13): between validation and the side effect, t
 
 ## What is honestly NOT guaranteed (spec §45, §72)
 
-Unless the underlying system enforces compare-and-swap end to end, a mutation that lands **after the final re-fetch but before the executor's effect** is outside the firewall's visibility. Every execution record states `atomicity: "guaranteed" | "not_guaranteed"`; the generic executor default is `not_guaranteed`, and the audit trail carries it. The firewall never claims transactional guarantees it cannot make.
+On providers **without** conditional execution, a mutation that lands **after the final re-fetch but before the executor's effect** is outside the firewall's visibility. Every execution record states `atomicity: "guaranteed" | "not_guaranteed"`; the generic executor default is `not_guaranteed`, and the audit trail carries it. On providers **with** conditional execution the external system enforces the condition inside the mutation itself — that is the milestone guarantee described in [atomic-effect-assurance.md](atomic-effect-assurance.md). The firewall never claims transactional guarantees it cannot make.

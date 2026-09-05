@@ -8,7 +8,7 @@
  * decisions in production paths unless an operator explicitly configures it.
  */
 
-import type { StateProvider } from '../types.js';
+import type { StateProvider, ConditionalMutationRequest, ConditionalMutationResult } from '../types.js';
 import type { StateDependency, StateSnapshot, StateProvenance } from '../../domain/state.js';
 import { newId, ID_PREFIXES } from '../../domain/identifiers.js';
 import { contentHashOf } from '../../engine/hashing.js';
@@ -39,9 +39,16 @@ export class InMemoryStateProvider implements StateProvider {
   private readonly resources = new Map<string, InMemoryResource>();
   private readonly mutations = new Map<string, InMemoryMutation[]>();
   private versionCounter = 0;
+  /** Timestamp recorded for CAS mutations (settable for deterministic tests). */
+  private lastMutationClock: string | null = null;
 
   constructor(sourceName = 'memory') {
     this.sourceName = sourceName;
+  }
+
+  /** Pins the timestamp used by subsequent conditionalExecute mutations. */
+  setMutationClock(atIso: string | null): void {
+    this.lastMutationClock = atIso;
   }
 
   get source(): string {
@@ -54,6 +61,53 @@ export class InMemoryStateProvider implements StateProvider {
 
   supportsConditionalVerification(): boolean {
     return true;
+  }
+
+  /**
+   * This provider performs mutations whose check and write happen inside one
+   * synchronous operation: conditional execution is genuinely supported.
+   */
+  supportsConditionalExecution(): boolean {
+    return true;
+  }
+
+  /**
+   * Deterministic atomic compare-and-swap mutation (milestone: atomic effect
+   * assurance). The version comparison and the mutation happen SYNCHRONOUSLY
+   * in the same call — the JS event loop cannot interleave another operation
+   * between them, so no separate get() then set() race exists. When the
+   * resource is not at `expected_version`, nothing is mutated and the
+   * provider reports condition_failed with the version it actually saw.
+   */
+  conditionalExecute(request: ConditionalMutationRequest): Promise<ConditionalMutationResult> {
+    const key = this.key(request.ref.resource, request.ref.resource_id);
+    const existing = this.resources.get(key);
+
+    // ---- atomic check-and-mutate: no await between compare and write ------
+    if (!existing || existing.version !== request.expected_version) {
+      // Unknown or changed resource: the authorized state is not true, the
+      // provider refuses. current_version is null for unknown resources.
+      return Promise.resolve({ outcome: 'condition_failed', current_version: existing?.version ?? null });
+    }
+
+    this.versionCounter += 1;
+    const newVersion = `v${this.versionCounter}`;
+    const previousVersion = existing.version;
+    this.resources.set(key, {
+      ...existing,
+      version: newVersion,
+      metadata: { ...existing.metadata, ...request.changes },
+      updated_at: this.lastMutationClock ?? existing.updated_at,
+    });
+    const log = this.mutations.get(key) ?? [];
+    log.push({
+      at: this.lastMutationClock ?? existing.updated_at,
+      previous_version: previousVersion,
+      new_version: newVersion,
+      changes: request.changes,
+    });
+    this.mutations.set(key, log);
+    return Promise.resolve({ outcome: 'executed', version: newVersion });
   }
 
   /**

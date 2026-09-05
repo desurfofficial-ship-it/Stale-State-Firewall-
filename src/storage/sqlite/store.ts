@@ -127,6 +127,18 @@ const MIGRATIONS: Array<{ version: number; statements: string[] }> = [
       )`,
     ],
   },
+  {
+    // Milestone: atomic effect assurance. Authorizations carry the expected
+    // state they are bound to; executions record the conditional-execution
+    // outcome. Columns are nullable so pre-existing rows remain readable.
+    version: 2,
+    statements: [
+      `ALTER TABLE authorizations ADD COLUMN expected_state TEXT`,
+      `ALTER TABLE executions ADD COLUMN conditional_execution TEXT`,
+      `ALTER TABLE executions ADD COLUMN expected_state TEXT`,
+      `ALTER TABLE executions ADD COLUMN observed_version TEXT`,
+    ],
+  },
 ];
 
 export interface SqliteStoreOptions {
@@ -360,8 +372,8 @@ export class SqliteStore implements FirewallStore {
     try {
       db.prepare(
         `INSERT INTO executions (execution_id, action_id, success, idempotency, output, error,
-          started_at, finished_at, duration_ms, atomicity)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          started_at, finished_at, duration_ms, atomicity, conditional_execution, expected_state, observed_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         execution.execution_id,
         execution.action_id,
@@ -373,6 +385,9 @@ export class SqliteStore implements FirewallStore {
         execution.finished_at,
         execution.duration_ms,
         execution.atomicity,
+        execution.conditional_execution ?? null,
+        execution.expected_state !== undefined ? safeJson(execution.expected_state) : null,
+        execution.observed_version ?? null,
       );
     } catch (error) {
       throw new StorageError(`failed to persist execution ${execution.execution_id}`, undefined, error);
@@ -397,8 +412,8 @@ export class SqliteStore implements FirewallStore {
     const db = this.check();
     try {
       db.prepare(
-        `INSERT OR REPLACE INTO authorizations (action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO authorizations (action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version, expected_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         auth.action_id,
         auth.decision_id,
@@ -407,6 +422,7 @@ export class SqliteStore implements FirewallStore {
         auth.state_fingerprint,
         auth.consumed_at,
         auth.policy_version,
+        auth.expected_state !== null ? safeJson(auth.expected_state) : null,
       );
     } catch (error) {
       throw new StorageError(`failed to persist authorization for ${auth.action_id}`, undefined, error);
@@ -421,15 +437,15 @@ export class SqliteStore implements FirewallStore {
       // authorization" and install one — the single-use gate is atomic.
       db.exec('BEGIN IMMEDIATE');
       const row = db
-        .prepare('SELECT action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version FROM authorizations WHERE action_id = ?')
+        .prepare('SELECT action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version, expected_state FROM authorizations WHERE action_id = ?')
         .get(auth.action_id) as Record<string, unknown> | undefined;
       if (row && row['consumed_at'] === null) {
         db.exec('ROLLBACK');
         return { claimed: false, existing: authorizationFromRow(row) };
       }
       db.prepare(
-        `INSERT OR REPLACE INTO authorizations (action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO authorizations (action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version, expected_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         auth.action_id,
         auth.decision_id,
@@ -438,6 +454,7 @@ export class SqliteStore implements FirewallStore {
         auth.state_fingerprint,
         auth.consumed_at,
         auth.policy_version,
+        auth.expected_state !== null ? safeJson(auth.expected_state) : null,
       );
       db.exec('COMMIT');
       return { claimed: true };
@@ -456,15 +473,7 @@ export class SqliteStore implements FirewallStore {
       | Record<string, unknown>
       | undefined;
     if (!row) return null;
-    return {
-      action_id: row['action_id'] as string,
-      decision_id: row['decision_id'] as string,
-      authorized_at: row['authorized_at'] as string,
-      expires_at: row['expires_at'] as string,
-      state_fingerprint: row['state_fingerprint'] as string,
-      consumed_at: (row['consumed_at'] as string | null) ?? null,
-      policy_version: row['policy_version'] as string,
-    };
+    return authorizationFromRow(row);
   }
 
   async consumeAuthorization(actionId: string, consumedAtIso: string): Promise<void> {
@@ -658,6 +667,12 @@ function executionFromRow(row: Record<string, unknown>): ExecutionResult {
     finished_at: row['finished_at'] as string,
     duration_ms: row['duration_ms'] as number,
     atomicity: row['atomicity'] as ExecutionResult['atomicity'],
+    conditional_execution: (row['conditional_execution'] as ExecutionResult['conditional_execution'] | null) ?? undefined,
+    expected_state:
+      row['expected_state'] !== null && row['expected_state'] !== undefined
+        ? (JSON.parse(row['expected_state'] as string) as ExecutionResult['expected_state'])
+        : undefined,
+    observed_version: (row['observed_version'] as string | null) ?? undefined,
   };
 }
 
@@ -693,6 +708,10 @@ function authorizationFromRow(row: Record<string, unknown>): AuthorizationRecord
     authorized_at: row['authorized_at'] as string,
     expires_at: row['expires_at'] as string,
     state_fingerprint: row['state_fingerprint'] as string,
+    expected_state:
+      row['expected_state'] !== null && row['expected_state'] !== undefined
+        ? (JSON.parse(row['expected_state'] as string) as AuthorizationRecord['expected_state'])
+        : null,
     consumed_at: (row['consumed_at'] as string | null) ?? null,
     policy_version: row['policy_version'] as string,
   };

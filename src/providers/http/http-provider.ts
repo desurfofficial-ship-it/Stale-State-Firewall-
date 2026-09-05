@@ -17,7 +17,7 @@
  * the resource is unchanged (provenance: conditional_304).
  */
 
-import type { StateProvider } from '../types.js';
+import type { StateProvider, ConditionalMutationRequest, ConditionalMutationResult } from '../types.js';
 import type { StateDependency, StateSnapshot, StateProvenance } from '../../domain/state.js';
 import { newId, ID_PREFIXES } from '../../domain/identifiers.js';
 import { sha256Hex } from '../../engine/hashing.js';
@@ -38,6 +38,86 @@ export class HttpStateProvider implements StateProvider {
 
   supportsConditionalVerification(): boolean {
     return true;
+  }
+
+  /**
+   * Conditional execution (If-Match) is available ONLY for resources whose
+   * config declares a mutation endpoint. A generic HTTP endpoint provides no
+   * atomicity guarantee unless the operator has verified the server honors
+   * If-Match (RFC 9110 preconditions); that is an explicit configuration act,
+   * not an assumption (milestone: atomic effect assurance, §14).
+   */
+  supportsConditionalExecution(): boolean {
+    return Object.values(this.resources).some((r) => r.mutation !== undefined);
+  }
+
+  /**
+   * Performs the configured mutation with an `If-Match: <expected_version>`
+   * precondition. The condition is evaluated BY THE SERVER as part of the
+   * mutation request itself: 412/409 (or the configured statuses) mean the
+   * server refused the stale operation — no side effect occurred. Any other
+   * non-2xx is a provider error, NOT a condition failure.
+   */
+  async conditionalExecute(request: ConditionalMutationRequest): Promise<ConditionalMutationResult> {
+    const config = this.resources[request.ref.resource];
+    if (!config || config.mutation === undefined) {
+      throw new ProviderResponseError(
+        this.name,
+        `resource "${request.ref.resource}" does not declare a conditional mutation endpoint`,
+      );
+    }
+    if (request.expected_version === '') {
+      throw new ProviderResponseError(this.name, 'conditional mutation requires a non-empty expected version');
+    }
+    const mutation = config.mutation;
+    const url = (mutation.url ?? config.url).replace('{id}', encodeURIComponent(request.ref.resource_id));
+    const headers: Record<string, string> = {
+      ...resolveHeaders(config.headers),
+      'content-type': 'application/json',
+      // THE CONDITION: the server must refuse the operation unless its
+      // current representation still matches this validator.
+      'if-match': request.expected_version,
+    };
+    const body = JSON.stringify({ ...(mutation.body ?? {}), ...request.changes });
+    const timeoutMs = config.timeout_ms ?? 5000;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: mutation.method ?? 'PUT',
+        headers,
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+        redirect: 'follow',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ProviderUnavailableError(this.name, message, { url: sanitizeUrl(url) });
+    }
+
+    if (response.status >= 200 && response.status < 300) {
+      return { outcome: 'executed', version: this.versionFromMutationResponse(config, response) };
+    }
+    const conditionFailedStatuses = mutation.condition_failed_status ?? [412, 409];
+    if (conditionFailedStatuses.includes(response.status)) {
+      // Server refused the stale operation; no side effect occurred.
+      return { outcome: 'condition_failed', current_version: response.headers.get('etag') };
+    }
+    throw new ProviderUnavailableError(
+      this.name,
+      `conditional mutation on ${sanitizeUrl(url)} failed with HTTP ${response.status}`,
+      { status: response.status },
+    );
+  }
+
+  /** Extracts the post-mutation version signal (configured extraction, else ETag). */
+  private versionFromMutationResponse(config: HttpResourceConfig, response: Response): string | null {
+    const etag = response.headers.get('etag');
+    if (config.version?.source === 'header') {
+      const header = response.headers.get(config.version.name);
+      if (header !== null) return header;
+    }
+    return etag;
   }
 
   async getState(ref: StateDependency, nowIso: string): Promise<StateSnapshot> {

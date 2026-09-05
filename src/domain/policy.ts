@@ -80,6 +80,20 @@ export interface ExecutionPolicyConfig {
   require_fresh_at_execution?: boolean;
   /** Permit retry of an executor-declared idempotent operation under the same action id. */
   allow_idempotent_retry?: boolean;
+  /**
+   * Require provider-side conditional execution (the external system itself
+   * rejects the operation when the authorized state is no longer true).
+   * When true and the executor cannot enforce the condition, the action is
+   * decided by `on_conditional_unavailable` (default deny) instead of
+   * falling back to best-effort pre-execution verification.
+   */
+  require_conditional_execution?: boolean;
+  /**
+   * Outcome when conditional execution is required but the executor/provider
+   * cannot enforce it. Default: deny. A human approval cannot give a
+   * provider compare-and-swap semantics, so escalate is NOT the default.
+   */
+  on_conditional_unavailable?: OutcomeDecision;
 }
 
 export interface FirewallPolicyConfig {

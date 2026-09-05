@@ -20,6 +20,7 @@ export const AUDIT_EVENT_TYPES = [
   'action.expired',
   'action.escalation_requested',
   'action.escalation_resolved',
+  'execution.condition_failed',
   'policy.evaluated',
   'policy.violation',
   'state.observed',
@@ -57,6 +58,22 @@ export interface AuditEventPayload {
   latency_ms?: number;
   risk_level?: RiskLevel;
   mode?: FirewallMode;
+  /** Conditional-execution outcome (milestone: atomic effect assurance). */
+  conditional_execution?: 'satisfied' | 'failed' | 'unavailable' | 'not_attempted';
+  /** The authorized expected state the conditional operation was bound to. */
+  expected_state?: Array<{ ref: string; version: string | null }>;
+  /** The version the external system reported when the condition was evaluated. */
+  observed_version?: string | null;
+  /** Provider that enforced (or refused) the conditional operation. */
+  provider?: string;
+  /**
+   * The decision that authorized this conditional operation. Named
+   * `decision_ref` (not authorization_id) deliberately: the redaction
+   * control redacts every key containing "auth*", and a decision id is not
+   * a secret — it must remain observable to reconstruct the lifecycle.
+   * The authorization itself is identified by action_id.
+   */
+  decision_ref?: string;
   [key: string]: unknown;
 }
 

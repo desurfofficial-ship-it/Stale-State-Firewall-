@@ -60,6 +60,24 @@ export interface HttpResourceConfig {
   timeout_ms?: number;
   /** Explicitly trust the resource supports conditional requests via ETag. */
   conditional?: boolean;
+  /**
+   * Declares a conditional mutation endpoint for this resource (milestone:
+   * atomic effect assurance). When present, the provider can perform the
+   * mutation with an If-Match precondition carrying the authorized version;
+   * the SERVER is responsible for refusing the operation (412/409) when its
+   * current state no longer matches. Operators MUST verify their endpoint
+   * honors If-Match — a server that ignores the header provides NO atomicity.
+   */
+  mutation?: {
+    /** HTTP method for the mutation (default PUT). */
+    method?: 'PUT' | 'PATCH' | 'POST' | 'DELETE';
+    /** URL template for the mutation; {id} is replaced; defaults to the read URL. */
+    url?: string;
+    /** Base JSON body; ConditionalMutationRequest.changes are merged over it. */
+    body?: Record<string, unknown>;
+    /** Status codes the server returns to reject a failed precondition (default [412, 409]). */
+    condition_failed_status?: number[];
+  };
 }
 
 export interface GitHubProviderConfigFile {

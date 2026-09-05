@@ -4,9 +4,8 @@
  * fail-fast: any malformed policy value throws before enforcement begins.
  */
 
-import type { FreshnessStrategy, FirewallPolicyConfig } from '../domain/policy.js';
+import type { FreshnessStrategy, FirewallPolicyConfig, OutcomeDecision } from '../domain/policy.js';
 import type { Precondition, RiskLevel } from '../domain/action.js';
-import type { OutcomeDecision } from '../domain/policy.js';
 import { ConfigurationError } from '../domain/errors.js';
 import { parseDurationMs } from './duration.js';
 
@@ -22,6 +21,10 @@ export interface ResolvedExecutionPolicy {
   deadlineMs: number | null;
   requireFreshAtExecution: boolean;
   allowIdempotentRetry: boolean;
+  /** Require provider-enforced conditional execution (atomic effect assurance). Default false. */
+  requireConditionalExecution?: boolean;
+  /** Outcome when conditional execution is required but unavailable. Default deny. */
+  onConditionalUnavailable?: OutcomeDecision;
 }
 
 export interface ResolvedPolicy {
@@ -144,6 +147,8 @@ export function resolveExecutionPolicy(
     deadlineMs,
     requireFreshAtExecution: config?.require_fresh_at_execution ?? true,
     allowIdempotentRetry: config?.allow_idempotent_retry ?? false,
+    requireConditionalExecution: config?.require_conditional_execution ?? false,
+    onConditionalUnavailable: config?.on_conditional_unavailable ?? 'deny',
   };
 }
 

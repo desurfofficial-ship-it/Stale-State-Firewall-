@@ -67,14 +67,20 @@ const POLICY_KEYS = new Set([
 const MATCHER_KEYS = new Set(['tool', 'operation', 'target', 'risk']);
 const FRESHNESS_KEYS = new Set(['strategy', 'max_age', 'aging_threshold', 'clock_skew_tolerance', 'hybrid']);
 const HYBRID_KEYS = new Set(['ttl', 'version', 'hash', 'preconditions']);
-const EXECUTION_KEYS = new Set(['deadline', 'require_fresh_at_execution', 'allow_idempotent_retry']);
+const EXECUTION_KEYS = new Set([
+  'deadline',
+  'require_fresh_at_execution',
+  'allow_idempotent_retry',
+  'require_conditional_execution',
+  'on_conditional_unavailable',
+]);
 const DEP_RULE_KEYS = new Set(['source', 'resource', 'resource_id', 'freshness']);
 const PROVIDERS_KEYS = new Set(['memory', 'http', 'github']);
 const MEMORY_KEYS = new Set(['enabled', 'source']);
 const HTTP_KEYS = new Set(['enabled', 'resources']);
 const HTTP_RESOURCE_KEYS = new Set([
   'url', 'headers', 'version', 'observed_at', 'metadata_paths',
-  'content_hash', 'timeout_ms', 'conditional',
+  'content_hash', 'timeout_ms', 'conditional', 'mutation',
 ]);
 const GITHUB_KEYS = new Set(['enabled', 'api_base', 'timeout_ms', 'include_reviews']);
 const RISK_DEFAULTS_KEYS = new Set(['rules', 'default']);
@@ -306,10 +312,26 @@ export function validatePolicyConfig(path: string, policy: unknown, out: PolicyV
     } else {
       unknownKeys(`${path}.execution`, policy['execution'], EXECUTION_KEYS, out);
       checkDuration(`${path}.execution.deadline`, policy['execution']['deadline'], out);
-      for (const key of ['require_fresh_at_execution', 'allow_idempotent_retry'] as const) {
+      for (const key of [
+        'require_fresh_at_execution',
+        'allow_idempotent_retry',
+        'require_conditional_execution',
+      ] as const) {
         if (policy['execution'][key] !== undefined && typeof policy['execution'][key] !== 'boolean') {
           out.push(v(`${path}.execution.${key}`, `${key} must be a boolean`));
         }
+      }
+      checkOutcome(`${path}.execution.on_conditional_unavailable`, policy['execution']['on_conditional_unavailable'], out);
+      if (
+        policy['execution']['require_conditional_execution'] === true &&
+        policy['execution']['on_conditional_unavailable'] === 'allow'
+      ) {
+        out.push(
+          v(
+            `${path}.execution.on_conditional_unavailable`,
+            'on_conditional_unavailable: "allow" contradicts require_conditional_execution: a policy that demands provider-enforced conditional execution cannot permit execution without it',
+          ),
+        );
       }
     }
   }
@@ -348,6 +370,33 @@ function validateHttpResource(path: string, resource: unknown, out: PolicyViolat
   unknownKeys(path, resource, HTTP_RESOURCE_KEYS, out);
   if (typeof resource['url'] !== 'string' || !/^https?:\/\//.test(resource['url'])) {
     out.push(v(`${path}.url`, 'url is required and must start with http:// or https://'));
+  }
+  if (resource['mutation'] !== undefined) {
+    if (!isRecord(resource['mutation'])) {
+      out.push(v(`${path}.mutation`, 'mutation must be an object'));
+    } else {
+      const mutation = resource['mutation'];
+      const method = mutation['method'];
+      if (method !== undefined && !['PUT', 'PATCH', 'POST', 'DELETE'].includes(method as string)) {
+        out.push(v(`${path}.mutation.method`, 'expected PUT, PATCH, POST, or DELETE'));
+      }
+      if (mutation['url'] !== undefined && (typeof mutation['url'] !== 'string' || !/^https?:\/\//.test(mutation['url'] as string))) {
+        out.push(v(`${path}.mutation.url`, 'mutation.url must start with http:// or https://'));
+      }
+      if (mutation['body'] !== undefined && !isRecord(mutation['body'])) {
+        out.push(v(`${path}.mutation.body`, 'mutation.body must be an object'));
+      }
+      if (mutation['condition_failed_status'] !== undefined) {
+        const statuses = mutation['condition_failed_status'];
+        if (
+          !Array.isArray(statuses) ||
+          statuses.length === 0 ||
+          statuses.some((s) => !Number.isInteger(s) || (s as number) < 400 || (s as number) > 499)
+        ) {
+          out.push(v(`${path}.mutation.condition_failed_status`, 'must be a non-empty array of 4xx status codes'));
+        }
+      }
+    }
   }
   if (resource['headers'] !== undefined) {
     if (!isRecord(resource['headers'])) {

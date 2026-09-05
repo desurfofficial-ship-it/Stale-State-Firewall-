@@ -104,16 +104,70 @@ export interface ActionIntent {
 export type IdempotencyKind = 'idempotent' | 'non_idempotent';
 
 /**
+ * The authorized state identity the firewall hands to a conditional
+ * executor: one entry per dependency validated at authorization time.
+ * The executor MUST forward these to the external system (ETag / expected
+ * SHA / compare-and-swap) rather than re-reading the current state itself.
+ */
+export interface ExpectedStateEntry {
+  /** Reference key "<source>:<resource>/<resource_id>". */
+  ref: string;
+  /** The provider's authoritative version signal at authorization time. */
+  version: string | null;
+  /** Content hash captured at authorization time. */
+  content_hash: string | null;
+}
+
+/**
+ * Outcome of a conditional execution attempt (milestone: atomic effect
+ * assurance).
+ *
+ * - 'satisfied': the external system enforced the condition, the condition
+ *   held, and the operation was applied. `success` reports whether the
+ *   operation itself completed without application-level error.
+ * - 'failed': the external system REJECTED the operation because its
+ *   authoritative state no longer matches the authorized expected state.
+ *   No side effect occurred. This is NOT an internal error and MUST NOT be
+ *   retried under the same authorization.
+ * - 'unavailable': the executor could not enforce the expected state for
+ *   every resource its effect touches, so it refused to act. No side effect
+ *   occurred.
+ */
+export type ConditionalExecutionResult =
+  | { condition: 'satisfied'; success: boolean; output?: unknown; error?: string }
+  | { condition: 'failed'; observed_version: string | null; error?: string }
+  | { condition: 'unavailable'; error?: string };
+
+/**
  * The executor performs the actual side effect AFTER an ALLOW decision.
  * Executors declare their retry safety and (honestly) whether the
  * underlying operation is atomic with the preceding validation. The default
  * assumption is non-idempotent and NOT atomic — the conservative choice.
+ *
+ * Conditional execution capability (optional): an executor that forwards the
+ * firewall-authorized expected state to the external system so that the
+ * EXTERNAL SYSTEM itself refuses the operation when its authoritative state
+ * no longer matches. A fresh read immediately before the mutation is NOT
+ * conditional execution. If the executor cannot enforce the expected state
+ * for every resource its effect touches, it MUST return 'unavailable'
+ * without performing the side effect.
  */
 export interface ActionExecutor {
   readonly idempotency: IdempotencyKind;
   /** Whether the provider enforces compare-and-swap semantics end to end. */
   readonly atomicity?: 'guaranteed' | 'not_guaranteed';
   execute(intent: ActionIntent): Promise<{ success: boolean; output?: unknown; error?: string }>;
+  /** Declares that conditionalExecute genuinely enforces the expected state at the external system. */
+  conditionalExecutionSupported?(): boolean;
+  /**
+   * Executes the action conditioned on the authorized expected state. Only
+   * called by the firewall after an ALLOW decision and an atomic claim of
+   * the authorization.
+   */
+  conditionalExecute?(
+    intent: ActionIntent,
+    expectedState: readonly ExpectedStateEntry[],
+  ): Promise<ConditionalExecutionResult>;
 }
 
 export interface ExecutionResult {
@@ -135,4 +189,14 @@ export interface ExecutionResult {
    * NOT atomic; the limitation is recorded here (spec §13, §45, §72).
    */
   atomicity: 'guaranteed' | 'not_guaranteed';
+  /**
+   * Conditional-execution outcome for this attempt (milestone: atomic effect
+   * assurance). 'not_attempted' when the legacy pre-execution re-check path
+   * was used (best-effort verification, no provider-enforced condition).
+   */
+  conditional_execution?: 'satisfied' | 'failed' | 'unavailable' | 'not_attempted';
+  /** The authorized expected state handed to the conditional executor. */
+  expected_state?: Array<{ ref: string; version: string | null }>;
+  /** The version the external system reported at conditional-execution time. */
+  observed_version?: string | null;
 }

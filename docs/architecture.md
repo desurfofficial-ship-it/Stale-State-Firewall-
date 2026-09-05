@@ -28,7 +28,7 @@ src/
   providers/       StateProvider implementations (spec §16-18).
     memory/          In-memory provider: tests, examples, policy fixtures
     http/            Generic HTTP: ETag/Last-Modified/JSON paths, env() headers
-    github/          GitHub REST: PRs, issues, branches, CI status, deployments, releases
+    github/          GitHub REST: PRs, issues, branches, CI status, deployments, releases, files (CAS)
 
   storage/         FirewallStore implementations (spec §37).
     sqlite/          node:sqlite, migrations, FKs, CHECK constraints, indexes
@@ -36,7 +36,7 @@ src/
 
   application/     Use cases (orchestration).
     validate-action.ts    Dry-run decision pipeline
-    execute-action.ts     Enforcement boundary + replay guard + TOCTOU re-check
+    execute-action.ts     Enforcement boundary + replay guard + TOCTOU re-check + conditional execution
     revalidate-action.ts  Recompute decisions from current state (spec §23)
     inspect-state.ts      Read-only state inspection
 
@@ -70,10 +70,17 @@ check(intent)                              execute(intent, executor)
     ├─ decide → DecisionRecord                 │    state (spec §23), fail closed on residual UNKNOWN
     │    (OBSERVE: record would-have)          ├─ ESCALATE? → hold for human approval
     ├─ saveDecision + audit                    ├─ DENY? → stop, audit action.blocked
-    └─ return DecisionRecord                   ├─ ALLOW → saveAuthorization (deadline)
-                                               ├─ TOCTOU re-fetch + fingerprint compare (§13)
-                                               ├─ state drifted? → DENY, audit action.blocked
-                                               ├─ executor() under deadline
+    └─ return DecisionRecord                   ├─ ALLOW → claimAuthorization (deadline, expected-state binding)
+                                               ├─ executor supports conditional execution?
+                                               │    ├─ YES → conditionalExecute(intent, authorized expected state)
+                                               │    │        ├─ condition satisfied → executed, atomicity guaranteed
+                                               │    │        ├─ condition failed → provider REFUSED; authorization
+                                               │    │        │   invalidated; fresh re-evaluation → new decision
+                                               │    │        │   (audit: execution.condition_failed) — never a retry
+                                               │    │        └─ unavailable → fail closed, nothing executes
+                                               │    └─ NO  → TOCTOU re-fetch + fingerprint compare (§13)
+                                               │             state drifted? → DENY, audit action.blocked
+                                               ├─ executor() / conditionalExecute() under deadline
                                                └─ consume authorization + saveExecution + audit
 ```
 
@@ -83,6 +90,7 @@ Key properties:
 2. **Validation always fetches current state.** Stored snapshots are forensics, never a freshness source (invariant 8).
 3. **Provider failures are UNKNOWN**, which fails closed per policy (invariant 7).
 4. **Authorizations are single-use** and expire; replay is detected and typed (spec §24).
+5. **Conditional execution closes the final TOCTOU window where providers support it.** The authorization binds the authorized expected state; the external system itself refuses the operation when that state is no longer true (milestone: atomic effect assurance, see [atomic-effect-assurance.md](atomic-effect-assurance.md)).
 
 ## Data model (SQLite)
 

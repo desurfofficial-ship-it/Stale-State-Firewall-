@@ -18,6 +18,9 @@ STALE-STATE FIREWALL
    ↓  revalidation
    ↓  policy decision
 ALLOW / DENY / REVALIDATE / ESCALATE
+   ↓  authorization bound to the authorized expected state
+   ↓  CONDITIONAL EXECUTION where the provider supports it:
+   ↓  the external system itself refuses the operation if its state moved
    ↓
 External System
 ```
@@ -172,6 +175,7 @@ Each example prints the observation, the external mutation, the firewall decisio
 | **Staleness classes** | `FRESH`, `AGING`, `STALE`, `INVALID`, `UNKNOWN` — never a boolean. |
 | **Decisions** | `ALLOW`, `DENY`, `REVALIDATE`, `ESCALATE` — never a silent execution. |
 | **Modes** | `observe` (log only), `enforce` (block), `strict` (any uncertainty denies). |
+| **Conditional execution** | Where the provider supports it, the external operation is conditioned on the exact state the firewall authorized — the provider itself rejects stale operations (compare-and-swap), closing the last TOCTOU window. |
 
 ## Policy example
 
@@ -200,6 +204,10 @@ Policies are validated before enforcement: unknown fields, dangerous defaults (`
 
 The firewall treats the agent as untrusted. It defends against forged observation metadata, replayed authorizations, dependency omission, direct tool bypass, provider outages disguised as success, and configuration weakening. Guarantees are stated precisely — including what the firewall *cannot* guarantee (see [docs/threat-model.md](docs/threat-model.md) and [docs/limitations.md](docs/limitations.md)).
 
+### Conditional execution (atomic effect assurance)
+
+Without provider support, the firewall's guarantee is pre-execution verification: *"the state was valid when I last verified it."* Where the provider supports conditional execution, the firewall establishes the stronger guarantee: *"the external system performed this operation only if the state still matched the state that was authorized."* The authorized expected state travels with the authorization; the external system (GitHub's Contents API blob-sha check, HTTP `If-Match`, the in-memory provider's atomic CAS) refuses stale mutations itself. A provider refusal (`execution.condition_failed`) is never success, never silently retried: the authorization is invalidated and a fresh decision is computed from current state. Policies can demand this capability (`execution.require_conditional_execution: true`, fail-closed when unavailable). Full model and capability matrix: [docs/atomic-effect-assurance.md](docs/atomic-effect-assurance.md).
+
 ## CLI
 
 `ssf init` · `ssf check` · `ssf policy validate` · `ssf policy test` · `ssf state inspect` · `ssf action inspect` · `ssf audit [--verify]` · `ssf doctor` · `ssf version`
@@ -209,7 +217,7 @@ Exit codes are deterministic: `0` allowed/success, `1` denied/policy decision, `
 ## Testing
 
 ```bash
-npm test           # 186 tests: unit, integration, contract, kill, race, property, red-team audit
+npm test           # 242 tests: unit, integration, contract, kill, race, property, red-team audit, conditional execution
 npm run build
 npm run lint
 npm run typecheck
@@ -221,6 +229,7 @@ The kill suite (docs/testing.md) tries to force the firewall into allowing an ac
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Atomic effect assurance (conditional execution)](docs/atomic-effect-assurance.md)
 - [Freshness model](docs/freshness.md)
 - [Policies](docs/policies.md)
 - [Providers](docs/providers.md)

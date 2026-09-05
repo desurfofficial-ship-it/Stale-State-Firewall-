@@ -18,6 +18,10 @@ export interface MetricCounters {
   replays_detected: number;
   escalations_requested: number;
   escalations_resolved: number;
+  /** Conditional executions where the provider enforced the condition and it held. */
+  conditional_executions_satisfied: number;
+  /** Conditional executions rejected by the provider (authorized state no longer true). */
+  conditional_executions_failed: number;
 }
 
 export interface LatencyStats {
@@ -48,6 +52,8 @@ function emptyCounters(): MetricCounters {
     replays_detected: 0,
     escalations_requested: 0,
     escalations_resolved: 0,
+    conditional_executions_satisfied: 0,
+    conditional_executions_failed: 0,
   };
 }
 

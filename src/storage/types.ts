@@ -8,7 +8,7 @@
  * records — append and read only (invariant 6).
  */
 
-import type { ActionIntent, ExecutionResult } from '../domain/action.js';
+import type { ActionIntent, ExecutionResult, ExpectedStateEntry } from '../domain/action.js';
 import type { DecisionRecord } from '../domain/decision.js';
 import type { StateSnapshot } from '../domain/state.js';
 import type { AuditEventInput, AuditRecord } from '../domain/audit.js';
@@ -20,6 +20,14 @@ export interface AuthorizationRecord {
   expires_at: string;
   /** Hash over the dependency versions at authorization time. */
   state_fingerprint: string;
+  /**
+   * The per-dependency authorized state identity this authorization is bound
+   * to (milestone: atomic effect assurance). Conditional execution forwards
+   * exactly these entries to the external system; an authorization whose
+   * expected state no longer matches the external state cannot execute.
+   * Null when the intent had no dependency state to bind (legacy shape).
+   */
+  expected_state: ExpectedStateEntry[] | null;
   consumed_at: string | null;
   policy_version: string;
 }
