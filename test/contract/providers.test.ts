@@ -133,7 +133,7 @@ describe('http provider contract against a live local server', () => {
     expect(snap.content_hash).toBe(`sha256:${sha256Hex(JSON.stringify(currentBody))}`);
   });
 
-  it('answers conditional verification with 304 -> unchanged_since_observed', async () => {
+  it('answers conditional verification with 304 -> unchanged_since_observed, never echoing agent metadata', async () => {
     currentEtag = 'W/"e2"';
     currentBody = { status: 'healthy', env: 'prod', updated_at: '2026-09-05T10:00:00Z' };
     const p = provider();
@@ -141,18 +141,19 @@ describe('http provider contract against a live local server', () => {
       {
         source: 'http', resource: 'thing', resource_id: '42',
         version: 'W/"e2"', content_hash: null, observed_at: null,
-        // The agent declares the mapped metadata fields, so a bodyless 304
-        // is enough for the provider to answer authoritatively.
-        metadata: { status: 'healthy', environment: 'prod' },
+        // A 304 attests "unchanged since <etag>" but carries no server-vouched
+        // content: agent-supplied metadata must never be echoed as current state.
+        metadata: { status: 'fabricated', environment: 'staging' },
       },
       new Date().toISOString(),
     );
     expect(conditional).not.toBeNull();
     expect(conditional!.unchanged_since_observed).toBe(true);
     expect(conditional!.provenance.validation_method).toBe('conditional_304');
+    expect(conditional!.metadata).toEqual({});
   });
 
-  it('falls back to a full fetch when mapped metadata is required but undeclared', async () => {
+  it('reports 304 snapshots with no metadata; the firewall forces a full fetch when preconditions need server-vouched fields', async () => {
     currentEtag = 'W/"e3"';
     currentBody = { status: 'healthy', env: 'prod', updated_at: '2026-09-05T10:00:00Z' };
     const p = provider();
@@ -160,11 +161,12 @@ describe('http provider contract against a live local server', () => {
       { source: 'http', resource: 'thing', resource_id: '42', version: 'W/"e3"', content_hash: null, observed_at: null, metadata: {} },
       new Date().toISOString(),
     );
-    // 304 carries no body; with metadata_paths configured and no declared
-    // metadata, the provider must fetch the body so preconditions are verifiable.
-    expect(conditional!.unchanged_since_observed).toBeUndefined();
-    expect(conditional!.provenance.validation_method).toBe('full_fetch');
-    expect(conditional!.metadata['status']).toBe('healthy');
+    // A 304 cannot vouch for field values. The snapshot carries no metadata;
+    // preconditions are only ever evaluated against full-fetch snapshots
+    // (enforced by the firewall's fetch path, see audit test S1).
+    expect(conditional!.unchanged_since_observed).toBe(true);
+    expect(conditional!.provenance.validation_method).toBe('conditional_304');
+    expect(conditional!.metadata).toEqual({});
   });
 
   it('server errors surface as ProviderUnavailableError, never silent success', async () => {

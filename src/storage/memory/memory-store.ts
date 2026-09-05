@@ -16,6 +16,7 @@ import { AUDIT_SCHEMA_VERSION } from '../../version.js';
 import type {
   FirewallStore,
   AuthorizationRecord,
+  AuthorizationClaimResult,
   EscalationRecord,
   EscalationStatus,
 } from '../types.js';
@@ -49,9 +50,12 @@ export class MemoryStore implements FirewallStore {
 
   async saveAction(action: ActionIntent): Promise<void> {
     this.check();
-    // Upsert by primary key: revalidating the same action id replaces the
-    // record with identical content; distinct ids always coexist.
-    this.actions.set(action.action_id, structuredClone(action));
+    // Keep-first: the FIRST intent recorded for an action id is preserved.
+    // A later submission re-using the same id (including a replay attempt
+    // with swapped semantics) must never rewrite the forensic record.
+    if (!this.actions.has(action.action_id)) {
+      this.actions.set(action.action_id, structuredClone(action));
+    }
   }
 
   async getAction(actionId: string): Promise<ActionIntent | null> {
@@ -133,6 +137,17 @@ export class MemoryStore implements FirewallStore {
   async saveAuthorization(auth: AuthorizationRecord): Promise<void> {
     this.check();
     this.authorizations.set(auth.action_id, structuredClone(auth));
+  }
+
+  async claimAuthorization(auth: AuthorizationRecord): Promise<AuthorizationClaimResult> {
+    this.check();
+    // Single-threaded synchronous check-and-set: atomic within this store.
+    const existing = this.authorizations.get(auth.action_id);
+    if (existing && existing.consumed_at === null) {
+      return { claimed: false, existing: structuredClone(existing) };
+    }
+    this.authorizations.set(auth.action_id, structuredClone(auth));
+    return { claimed: true };
   }
 
   async getAuthorization(actionId: string): Promise<AuthorizationRecord | null> {

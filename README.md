@@ -209,7 +209,7 @@ Exit codes are deterministic: `0` allowed/success, `1` denied/policy decision, `
 ## Testing
 
 ```bash
-npm test           # 157+ tests: unit, integration, contract, kill, race, property
+npm test           # 186 tests: unit, integration, contract, kill, race, property, red-team audit
 npm run build
 npm run lint
 npm run typecheck

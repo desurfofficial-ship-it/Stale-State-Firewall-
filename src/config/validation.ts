@@ -285,7 +285,20 @@ export function validatePolicyConfig(path: string, policy: unknown, out: PolicyV
     out.push(v(`${path}.on_invalid`, 'on_invalid: "allow" is forbidden — state has demonstrably changed; use deny, revalidate, or escalate'));
   }
   if (policy['on_unknown'] === 'allow') {
-    out.push(v(`${path}.on_unknown`, 'on_unknown: "allow" requires firewall.acknowledge_unknown_allow: true and is rejected for CRITICAL-risk policies'));
+    out.push(
+      v(
+        `${path}.on_unknown`,
+        'on_unknown: "allow" is not accepted on named policies; configure it under defaults with firewall.acknowledge_unknown_allow: true if intent',
+      ),
+    );
+  }
+  if (policy['on_stale'] === 'allow') {
+    out.push(
+      v(
+        `${path}.on_stale`,
+        'on_stale: "allow" defeats the freshness guarantee; set firewall.acknowledge_unknown_allow: true to accept it explicitly for this policy',
+      ),
+    );
   }
   if (policy['execution'] !== undefined) {
     if (!isRecord(policy['execution'])) {
@@ -573,6 +586,18 @@ export function validateConfig(config: FirewallRootConfigFile): PolicyViolation[
       v(
         '$.defaults.on_unknown',
         'UNKNOWN -> "allow" is a dangerous default; set firewall.acknowledge_unknown_allow: true to accept it explicitly',
+      ),
+    );
+  }
+
+  // Dangerous default: STALE -> allow defeats the freshness guarantee and
+  // requires the same explicit acknowledgment as unknown-allow.
+  const staleOutcome = defaults?.on_stale ?? defaults?.stale;
+  if (staleOutcome === 'allow' && fw.acknowledge_unknown_allow !== true) {
+    out.push(
+      v(
+        '$.defaults.on_stale',
+        'STALE -> "allow" is a dangerous default; set firewall.acknowledge_unknown_allow: true to accept it explicitly',
       ),
     );
   }

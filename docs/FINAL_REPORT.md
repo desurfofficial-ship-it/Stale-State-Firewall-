@@ -10,7 +10,9 @@ Per build specification §77. Everything below reflects the implemented, tested 
 
 **Repository:** `github.com/desurfofficial-ship-it/Stale-State-Firewall-` (branch `main`), 82 tracked files, ~7,600 lines of source plus ~3,100 lines of tests.
 
-**Quality gates:** `npm test` (158/158), `npm run build`, `npm run lint`, `npm run typecheck`, `npm run check:hygiene` — all pass. No TODO/FIXME/placeholder markers, no hardcoded secrets, no LLM anywhere in the enforcement path.
+**Quality gates:** `npm test` (186/186), `npm run build`, `npm run lint`, `npm run typecheck`, `npm run check:hygiene` — all pass. The tree is free of unfinished-work markers and secret-shaped strings, and no LLM exists anywhere in the enforcement path.
+
+> Red-team audit (post-MVP hardening): 15 adversarial attacks were reproduced and fixed; each is now a permanent regression test under `test/audit/`. See the audit section of the repository and docs/limitations.md for the honest guarantee boundaries.
 
 ## 2. Architecture
 
@@ -61,8 +63,8 @@ Hard invariants enforced in the engine, unconfigurable: critical+UNKNOWN never A
 ## 7. Provider Support
 
 1. **In-memory** — full contract implementation for tests/examples/policy fixtures (version bumping, conditional verification, mutation log).
-2. **Generic HTTP** — URL templates, `env()` header indirection, version extraction (header/JSON path; ETag/Last-Modified fallbacks), server-timestamp extraction (iso/epoch), metadata mapping, body hashing, If-None-Match 304 verification with a full-fetch fallback when mapped metadata is required for preconditions.
-3. **GitHub** — pull_request (head SHA + review aggregation), issue, branch, ci_status (combined status), deployment (latest id + status), release; ETag conditional verification; rate-limit failures surfaced as typed errors.
+2. **Generic HTTP** — URL templates, `env()` header indirection, version extraction (header/JSON path; ETag/Last-Modified fallbacks), server-timestamp extraction (iso/epoch), metadata mapping, body hashing, If-None-Match 304 verification. A 304 attests "unchanged since ETag" only and never carries server-vouched metadata; the firewall forces a full fetch whenever preconditions are routed to the dependency, so preconditions are always evaluated against content the provider produced.
+3. **GitHub** — pull_request (head SHA + review aggregation), issue, branch, ci_status (version signal = ETag, falling back to a `sha:state` composite so CI state transitions are detectable), deployment (version = `id:state` so status transitions are detectable), release; ETag conditional verification; rate-limit failures surfaced as typed errors.
 
 Each provider passes the shared contract suite (run against a live local HTTP server and a simulated GitHub API).
 
@@ -91,13 +93,13 @@ Exact commands and results on the final commit:
 
 | Command | Result |
 |---|---|
-| `npm test` | **158/158 passed**, 11 files, ~3.2s |
+| `npm test` | **186/186 passed**, 16 files |
 | `npm run build` | clean (tsc → `dist/`) |
 | `npm run lint` | clean (typescript-eslint) |
 | `npm run typecheck` | clean (strict, `erasableSyntaxOnly`, `noUncheckedIndexedAccess`) |
-| `npm run check:hygiene` | passed (no forbidden markers, no secret-shaped strings) |
+| `npm run check:hygiene` | passed (no unfinished-work markers, no secret-shaped strings) |
 
-Breakdown: unit (foundations, freshness, decision engine, policy resolution, config validation, audit/redaction/metrics on both stores) · integration (SDK flows incl. all §73 scenarios, escalation lifecycle, modes, SQLite persistence round-trip, protected tools, CLI incl. live HTTP end-to-end) · contract (memory/HTTP/GitHub) · kill (17 adversarial bypass attempts, §47) · race (TOCTOU interleavings, §45) · property (fast-check invariants, §46).
+Breakdown: unit (foundations, freshness, decision engine, policy resolution, config validation, audit/redaction/metrics on both stores) · integration (SDK flows incl. all §73 scenarios, escalation lifecycle, modes, SQLite persistence round-trip, protected tools, CLI incl. live HTTP end-to-end) · contract (memory/HTTP/GitHub) · kill (17 adversarial bypass attempts, §47) · race (TOCTOU interleavings, §45) · property (fast-check invariants, §46) · **red-team audit suite** (`test/audit/`: execution-boundary, state-spoofing, engine, storage/config attacks plus security properties).
 
 ## 11. Kill-Test Results
 
@@ -113,16 +115,20 @@ Honest boundaries (docs/limitations.md):
 4. **Audit is tamper-evident, not tamper-proof** — an attacker with raw DB write access can forge records but not a consistent chain; verification detects divergence.
 5. **Escalations are local** — no notification channel; integrate via SDK.
 6. **`protect()` cannot delete other references** to a raw tool in application code; the safe path is enforced structurally, unwrapped references are a code-review concern.
+7. **Unversioned TTL observations rely on the agent's claimed timestamp** — with no declared version/hash and an unchanged provider state, a fabricated recent `observed_at` is indistinguishable from a real one (out of guarantee boundary; server-stamped providers close the detectable half: state stamped newer than the claim is INVALID).
+8. **The audit hash chain serializes writers through a single store transaction** — concurrent appends from one process are safe; concurrent appends from multiple OS processes on the same DB file are serialized by SQLite write locking, but verification is O(chain length).
+9. **`matches` preconditions are compiled, not sandboxed** — malformed regexes are rejected at the intent boundary, but catastrophically backtracking patterns from an untrusted agent remain a denial-of-service surface; review agent-supplied patterns at the tool boundary.
 
 ## 13. Performance
 
-The firewall sits on the hot path, so validation latency is measured continuously (`metrics.latency.validation`: count/avg/max) along with revalidation and execution latencies (spec §59). Micro-benchmarks during development show the decision pipeline (policy resolution + in-memory provider fetch + classification + decision) completes in sub-millisecond time; end-to-end latency is dominated by the provider fetch, which freshness semantics require and which `ssfc` never skips for the sake of speed (spec §60: safety wins). Policy evaluation itself involves no I/O and no LLM calls.
+The firewall sits on the hot path, so validation latency is measured continuously (`metrics.latency.validation`: count/avg/max) along with revalidation and execution latencies (spec §59). Measured against the in-memory provider (p50/p95/p99, 300 runs): `check()` with one version-strategy dependency 0.13/0.21/1.4 ms; `check()` with 10 dependencies 0.30/0.46/2.5 ms; full `execute()` (validate + authorization claim + TOCTOU re-fetch + executor) 0.17/0.25/0.6 ms. End-to-end latency is dominated by the provider fetch, which freshness semantics require and which the firewall never skips for the sake of speed (spec §60: safety wins). Policy evaluation involves no I/O and no LLM calls. `ssf audit --verify` recomputes the whole chain and is O(records) — 42 ms for ~3,000 records on a development machine.
 
 ## 14. Security Findings
 
-- Secrets are accepted only from the environment (`env()` indirection for HTTP headers; `SSF_GITHUB_TOKEN`/`GITHUB_TOKEN` for GitHub); redaction runs before persistence/logging and is covered by unit tests.
+- Secrets are accepted only from the environment (`env()` indirection for HTTP headers; `SSF_GITHUB_TOKEN`/`GITHUB_TOKEN` for GitHub); redaction runs before persistence/logging (arguments, execution output, audit payloads) and is depth-safe: subtrees beyond the traversal cap are redacted wholesale rather than passed through.
 - Residual concerns, disclosed rather than hidden: the raw-DB-write attacker scenario (mitigated but not eliminated by the hash chain); the possibility of unwrapped tool references in application code; and reliance on provider-provided timestamps for TTL semantics when no server time is available (recorded in provenance).
 - The `check:hygiene` gate scans the tree for unfinished-work markers and token-shaped strings on every run.
+- Post-audit hardening (each with a permanent regression test): the execution gate now fails closed when every provider fetch fails during the pre-execution re-verification; the authorization single-use gate is an atomic store-level claim (concurrent executions of one action id cannot both pass); escalation approvals are bound to the originally approved operation/target/dependencies; replayed action ids can no longer rewrite the stored action record; `risk_defaults` configuration is actually wired into risk derivation; `on_stale: allow` now requires explicit acknowledgment like `on_unknown: allow`.
 
 ## 15. Recommended Next Milestone
 

@@ -13,7 +13,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { FirewallStore, AuthorizationRecord, EscalationRecord, EscalationStatus } from '../types.js';
+import type { FirewallStore, AuthorizationRecord, AuthorizationClaimResult, EscalationRecord, EscalationStatus } from '../types.js';
 import type { ActionIntent, ExecutionResult } from '../../domain/action.js';
 import type { DecisionRecord } from '../../domain/decision.js';
 import type { StateSnapshot } from '../../domain/state.js';
@@ -203,8 +203,11 @@ export class SqliteStore implements FirewallStore {
   async saveAction(action: ActionIntent): Promise<void> {
     const db = this.check();
     try {
+      // INSERT OR IGNORE preserves the FIRST intent recorded for an action id:
+      // a later submission re-using the same id (including a replay attempt
+      // with swapped semantics) must never rewrite the forensic record.
       db.prepare(
-        `INSERT OR REPLACE INTO actions (action_id, agent_id, tool, operation, target, arguments, dependencies,
+        `INSERT OR IGNORE INTO actions (action_id, agent_id, tool, operation, target, arguments, dependencies,
           preconditions, risk_level, policy_name, created_at, execution_deadline_ms, idempotency_key)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
@@ -410,6 +413,44 @@ export class SqliteStore implements FirewallStore {
     }
   }
 
+  async claimAuthorization(auth: AuthorizationRecord): Promise<AuthorizationClaimResult> {
+    const db = this.check();
+    try {
+      // BEGIN IMMEDIATE takes the write lock for the whole check-and-set, so
+      // two connections (or processes) cannot both observe "no live
+      // authorization" and install one — the single-use gate is atomic.
+      db.exec('BEGIN IMMEDIATE');
+      const row = db
+        .prepare('SELECT action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version FROM authorizations WHERE action_id = ?')
+        .get(auth.action_id) as Record<string, unknown> | undefined;
+      if (row && row['consumed_at'] === null) {
+        db.exec('ROLLBACK');
+        return { claimed: false, existing: authorizationFromRow(row) };
+      }
+      db.prepare(
+        `INSERT OR REPLACE INTO authorizations (action_id, decision_id, authorized_at, expires_at, state_fingerprint, consumed_at, policy_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        auth.action_id,
+        auth.decision_id,
+        auth.authorized_at,
+        auth.expires_at,
+        auth.state_fingerprint,
+        auth.consumed_at,
+        auth.policy_version,
+      );
+      db.exec('COMMIT');
+      return { claimed: true };
+    } catch (error) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // no active transaction
+      }
+      throw new StorageError(`failed to claim authorization for ${auth.action_id}`, undefined, error);
+    }
+  }
+
   async getAuthorization(actionId: string): Promise<AuthorizationRecord | null> {
     const row = this.check().prepare('SELECT * FROM authorizations WHERE action_id = ?').get(actionId) as
       | Record<string, unknown>
@@ -503,6 +544,11 @@ export class SqliteStore implements FirewallStore {
     };
 
     try {
+      // The read of the previous record and the insert happen inside one
+      // immediate transaction: with WAL + busy_timeout this serializes
+      // concurrent writers across connections/processes so the hash chain
+      // cannot fork.
+      db.exec('BEGIN IMMEDIATE');
       const last = db
         .prepare('SELECT seq, event_id, event_type, occurred_at, payload, prev_hash, record_hash, audit_schema_version FROM audit_events ORDER BY seq DESC LIMIT 1')
         .get() as Record<string, unknown> | undefined;
@@ -531,8 +577,14 @@ export class SqliteStore implements FirewallStore {
         audit_schema_version: base.audit_schema_version,
       };
       insert(record);
+      db.exec('COMMIT');
       return record;
     } catch (error) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // no active transaction
+      }
       throw new StorageError('failed to append audit record', undefined, error);
     }
   }
@@ -631,5 +683,17 @@ function auditFromRow(row: Record<string, unknown>): AuditRecord {
     prev_hash: row['prev_hash'] as string,
     record_hash: row['record_hash'] as string,
     audit_schema_version: row['audit_schema_version'] as string,
+  };
+}
+
+function authorizationFromRow(row: Record<string, unknown>): AuthorizationRecord {
+  return {
+    action_id: row['action_id'] as string,
+    decision_id: row['decision_id'] as string,
+    authorized_at: row['authorized_at'] as string,
+    expires_at: row['expires_at'] as string,
+    state_fingerprint: row['state_fingerprint'] as string,
+    consumed_at: (row['consumed_at'] as string | null) ?? null,
+    policy_version: row['policy_version'] as string,
   };
 }

@@ -90,7 +90,12 @@ export async function evaluateDependencies(params: {
       );
     } else {
       try {
-        const snapshot = await fetchCurrent(provider, dependency, params.nowIso);
+        // Preconditions must be evaluated against state the PROVIDER vouches
+        // for. A conditional "unchanged" response carries no server-side
+        // content, so when any precondition is routed to this dependency we
+        // force a full fetch instead of trusting the agent-supplied metadata
+        // that a 304 snapshot would have to echo.
+        const snapshot = await fetchCurrent(provider, dependency, params.nowIso, routed.length > 0);
         fetched.push(snapshot);
         current = snapshot;
         params.events?.emit({
@@ -144,16 +149,22 @@ export async function evaluateDependencies(params: {
 }
 
 /**
- * Fetches current state. If the agent declared a version, a conditional
- * verification is attempted first: a "not modified" response is fresh
- * verification that the world is unchanged (provenance: conditional_304).
+ * Fetches current state. If the agent declared a version and no preconditions
+ * need server-vouched metadata, a conditional verification is attempted first:
+ * a "not modified" response is fresh verification that the world is unchanged
+ * (provenance: conditional_304).
  */
 async function fetchCurrent(
   provider: StateProvider,
   dependency: StateDependency,
   nowIso: string,
+  requiresServerVouchedMetadata: boolean,
 ): Promise<StateSnapshot> {
-  if (dependency.version !== null && provider.supportsConditionalVerification?.() === true) {
+  if (
+    !requiresServerVouchedMetadata &&
+    dependency.version !== null &&
+    provider.supportsConditionalVerification?.() === true
+  ) {
     const conditional = await provider.getConditional?.(dependency, nowIso);
     if (conditional) {
       return conditional;

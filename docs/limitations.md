@@ -21,7 +21,8 @@ The firewall re-fetches state immediately before the side effect and blocks on d
 ### Staleness detection quality is bounded by provider signals
 
 - If a provider exposes no version/hash signal, only TTL and precondition semantics apply; a semantic change that bumps no version and shifts no mapped field cannot be detected.
-- TTL freshness depends on timestamps. Providers that do not expose server timestamps leave the firewall with client-clock ages (recorded in provenance as `time_source: client`).
+- TTL freshness depends on timestamps. Providers that do not expose server timestamps leave the firewall with client-clock ages (recorded in provenance as `time_source: client`). When the agent declares NO version and NO content hash, the claimed `observed_at` cannot be verified at all: a fabricated "just now" claim on an unchanged resource is indistinguishable from an honest one. Server-stamped providers close the detectable half (state stamped newer than the claim → INVALID), but an unchanged world plus a lying agent with no comparable signal is out of guarantee boundary. Require `version`/`hash` strategies for untrusted agents.
+- A conditional (304) verification attests "unchanged since ETag" only. It never carries server-vouched field values, so the firewall forces a full fetch whenever preconditions are routed to the dependency — preconditions are never evaluated against agent-supplied metadata.
 - `review_status` aggregation for GitHub PRs follows the standard "latest review per reviewer" rule; org-specific approval policies (CODEOWNERS weightings, dismissals on new commits) are not modeled — model them with preconditions where the API exposes the inputs.
 
 ### Preconditions are only as good as the mapped metadata
@@ -42,5 +43,7 @@ Deliberately not built yet: SaaS dashboard, billing/teams/SSO, additional SDKs (
 ## Operational notes
 
 - SQLite storage uses `node:sqlite` (Node >= 22.13). WAL mode is enabled for file-backed databases.
-- The audit chain is tamper-**evident**, not tamper-**proof**: an attacker with raw database write access can forge records, but cannot forge a consistent chain without recomputing all subsequent hashes — which `ssf audit --verify` detects. For stronger guarantees, ship the ledger tail to append-only external storage.
+- The audit chain is tamper-**evident**, not tamper-**proof**: an attacker with raw database write access can forge records, but cannot forge a consistent chain without recomputing all subsequent hashes — which `ssf audit --verify` detects. For stronger guarantees, ship the ledger tail to append-only external storage. Appends are serialized inside a single immediate transaction; concurrent writers across processes on the same database file are serialized by SQLite write locking. Verification recomputes the entire chain (O(records)).
+- The single-use execution gate is an atomic store-level claim: two concurrent executions of one action id cannot both pass, even when both reach the gate before either lands. After a pre-execution TOCTOU denial the authorization stays live until its deadline — retries with the same action id are refused (use a new action id to re-attempt); this is the conservative direction.
+- Escalation approvals bind to the approved semantics (tool, operation, target, declared dependencies). Submitting a different action under an approved action id is refused.
 - Escalations are held in local storage; there is no built-in notification channel. Integrate the SDK calls into your paging tooling.

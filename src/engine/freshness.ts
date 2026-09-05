@@ -109,6 +109,32 @@ export function evaluateFreshness(params: {
     };
   }
 
+  // Server-stamped drift: when the provider's own server clock says the state
+  // was produced/changed AFTER the agent's claimed observation, the agent's
+  // claim is provably outdated — regardless of what TTL the policy allows.
+  // Only server-stamped current state participates (a client-side fetch
+  // timestamp would trivially be newer than any claim and would fire on every
+  // action). The skew tolerance absorbs benign clock divergence.
+  if (
+    dependency.observed_at !== null &&
+    current.provenance.time_source === 'server' &&
+    current.observed_at !== null
+  ) {
+    const claimedMs = Date.parse(dependency.observed_at);
+    const currentMs = Date.parse(current.observed_at);
+    if (Number.isFinite(claimedMs) && Number.isFinite(currentMs) && currentMs > claimedMs + freshness.skewToleranceMs) {
+      return {
+        staleness: 'INVALID',
+        reason:
+          `authoritative state is newer than the claimed observation: state timestamp ${current.observed_at} is after ` +
+          `claimed observed_at ${dependency.observed_at}; the observation cannot justify the action`,
+        preconditions: preconditionResults,
+        ageMs: age.ageMs,
+        maxAgeMs: freshness.maxAgeMs ?? null,
+      };
+    }
+  }
+
   switch (freshness.strategy) {
     case 'ttl':
       return evaluateTtl(dependency, age.ageMs, freshness, preconditionResults);

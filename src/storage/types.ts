@@ -26,6 +26,14 @@ export interface AuthorizationRecord {
 
 export type EscalationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
+/** Result of an atomic authorization claim. */
+export interface AuthorizationClaimResult {
+  /** True when the claim succeeded and the authorization is now live. */
+  claimed: boolean;
+  /** The live authorization that blocked the claim, when claimed is false. */
+  existing?: AuthorizationRecord;
+}
+
 export interface EscalationRecord {
   action_id: string;
   decision_id: string;
@@ -59,6 +67,13 @@ export interface FirewallStore {
   saveAuthorization(auth: AuthorizationRecord): Promise<void>;
   getAuthorization(actionId: string): Promise<AuthorizationRecord | null>;
   consumeAuthorization(actionId: string, consumedAtIso: string): Promise<void>;
+  /**
+   * Atomically installs a new live authorization for the action id, refusing
+   * the claim when a live (unconsumed) authorization already exists. This is
+   * the authoritative single-use gate for executions and must be safe under
+   * concurrent callers on the same action id.
+   */
+  claimAuthorization(auth: AuthorizationRecord): Promise<AuthorizationClaimResult>;
 
   saveEscalation(escalation: EscalationRecord): Promise<void>;
   getEscalation(actionId: string): Promise<EscalationRecord | null>;

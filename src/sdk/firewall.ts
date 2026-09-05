@@ -141,7 +141,7 @@ export class StaleStateFirewall {
       logger,
       policies: core.policies,
       defaults: core.defaults,
-      riskDefaults: null,
+      riskDefaults: core.riskDefaults,
       mode,
       policyVersion: POLICY_SCHEMA_VERSION,
     };

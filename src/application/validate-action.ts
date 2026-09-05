@@ -11,6 +11,7 @@
  */
 
 import type { ActionIntent, ActionIntentInput, Precondition, RiskLevel } from '../domain/action.js';
+import type { RiskDefaultsConfig } from '../domain/policy.js';
 import type { DecisionRecord, FirewallMode } from '../domain/decision.js';
 import type { StateSnapshot, StateDependency } from '../domain/state.js';
 import type { ResolvedPolicy, GlobalDefaults } from '../engine/resolved-policy.js';
@@ -27,6 +28,7 @@ import { newId, ID_PREFIXES } from '../domain/identifiers.js';
 import { resolveGlobalDefaults } from '../config/loader.js';
 import type { FirewallRootConfigFile } from '../config/schema.js';
 import { resolvePolicyConfig } from '../config/loader.js';
+import { redactDeep } from '../redaction/redact.js';
 
 export interface ValidationOutcome {
   intent: ActionIntent;
@@ -44,11 +46,17 @@ export function buildPolicyCore(file: FirewallRootConfigFile): {
   policies: ResolvedPolicy[];
   defaults: GlobalDefaults;
   mode: FirewallMode;
+  riskDefaults: RiskDefaultsConfig | null;
 } {
   return {
     policies: (file.actions ?? []).map(resolvePolicyConfig),
     defaults: resolveGlobalDefaults(file),
     mode: file.firewall.mode.toUpperCase() as FirewallMode,
+    // Operator-declared operation->risk mappings must actually reach the
+    // decision path; dropping them silently would under-classify risk.
+    riskDefaults: file.risk_defaults
+      ? { rules: file.risk_defaults.rules ?? [], default: file.risk_defaults.default ?? 'MEDIUM' }
+      : null,
   };
 }
 
@@ -79,7 +87,7 @@ export async function validateAction(
   const policy = resolution.policy;
   intent.risk_level = resolution.risk;
 
-  await ctx.store.saveAction(intent);
+  await ctx.store.saveAction({ ...intent, arguments: redactDeep(intent.arguments) });
 
   ctx.audit.append('action.proposed', {
     action_id: intent.action_id,

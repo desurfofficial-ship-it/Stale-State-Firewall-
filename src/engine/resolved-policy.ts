@@ -125,12 +125,21 @@ export function resolveFreshness(
   return { strategy, maxAgeMs, agingThreshold, skewToleranceMs, hybridComponents };
 }
 
+/** Node's setTimeout collapses delays above 2^31-1 ms; cap below that so an
+ * execution deadline can never silently become a ~1ms timer. */
+export const MAX_EXECUTION_DEADLINE_MS = 2_147_000_000;
+
 export function resolveExecutionPolicy(
   config: FirewallPolicyConfig['execution'],
   field: string,
 ): ResolvedExecutionPolicy {
   const deadlineMs =
     config?.deadline !== undefined ? parseDurationMs(config.deadline, `${field}.deadline`) : null;
+  if (deadlineMs !== null && deadlineMs > MAX_EXECUTION_DEADLINE_MS) {
+    throw new ConfigurationError(
+      `${field}.deadline must not exceed ${MAX_EXECUTION_DEADLINE_MS}ms (platform timer range); got ${deadlineMs}ms`,
+    );
+  }
   return {
     deadlineMs,
     requireFreshAtExecution: config?.require_fresh_at_execution ?? true,

@@ -17,10 +17,18 @@ export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_PATTERN.test(key);
 }
 
+/** Maximum traversal depth before the remaining subtree is considered untrusted. */
+export const MAX_REDACTION_DEPTH = 24;
+
 /** Deeply clones a value, replacing every sensitive-keyed leaf with [REDACTED]. */
 export function redactDeep<T>(value: T, depth = 0): T {
-  if (depth > 24) {
-    return value;
+  if (depth > MAX_REDACTION_DEPTH) {
+    // Beyond the traversal cap the structure can no longer be inspected
+    // safely (and may be adversarially deep): redact it wholesale instead of
+    // passing it through, so depth alone cannot smuggle secrets past redaction.
+    return (Array.isArray(value) || (value !== null && typeof value === 'object')
+      ? REDACTED
+      : value) as unknown as T;
   }
   if (Array.isArray(value)) {
     return value.map((item) => redactDeep(item, depth + 1)) as unknown as T;

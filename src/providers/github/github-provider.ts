@@ -130,6 +130,8 @@ export class GitHubStateProvider implements StateProvider {
     const url = this.urlFor(ref.resource, parsed);
     const response = await this.request(url, ref.version);
     if (response.status === 304) {
+      // A 304 attests "unchanged since <etag>" and carries no server content:
+      // never echo agent-supplied metadata as current state.
       const provenance: StateProvenance = {
         provider: this.name,
         retrieved_at: nowIso,
@@ -144,7 +146,7 @@ export class GitHubStateProvider implements StateProvider {
         observed_at: ref.observed_at ?? nowIso,
         version: ref.version,
         content_hash: ref.content_hash,
-        metadata: ref.metadata,
+        metadata: {},
         provenance,
         unchanged_since_observed: true,
       };
@@ -245,7 +247,13 @@ export class GitHubStateProvider implements StateProvider {
       environment: parsed.environment,
     };
     const snapshot = this.buildSnapshot(ref, merged, response, nowIso);
-    snapshot.version = latest['id'] !== undefined ? String(latest['id']) : snapshot.version;
+    // The deployment id alone is invariant while the deployment's own status
+    // transitions (queued -> in_progress -> success/failure); fold the state
+    // into the version so drift is detectable by version comparison.
+    snapshot.version =
+      latest['id'] !== undefined
+        ? `${String(latest['id'])}:${deploymentState ?? 'unknown'}`
+        : snapshot.version;
     snapshot.metadata['state'] = deploymentState;
     return snapshot;
   }
@@ -366,7 +374,15 @@ function pickVersion(resource: string, metadata: Record<string, unknown>, etag: 
     return metadata['commit_sha'] as string | null ?? etag;
   }
   if (resource === 'ci_status') {
-    return metadata['sha'] as string | null ?? etag;
+    // The commit SHA alone is INVARIANT while CI state changes (pending ->
+    // success -> failure on the same SHA), which would report stale state as
+    // current. Prefer the ETag (changes whenever the status does); otherwise
+    // fold the state into the composite version signal.
+    const state = metadata['state'];
+    const sha = metadata['sha'] as string | null;
+    if (etag !== null) return etag;
+    if (sha !== null && sha !== undefined && typeof state === 'string') return `${sha}:${state}`;
+    return sha ?? etag;
   }
   if (resource === 'issue') {
     return etag ?? (metadata['updated_at'] as string | null);

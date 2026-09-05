@@ -24,12 +24,15 @@ import {
   collectPreconditions,
 } from './validate-action.js';
 import type { ActionIntentInput } from '../domain/action.js';
+import { normalizeIntent } from './normalize-intent.js';
 import { recomputeVerdictsFromCurrentState } from './revalidate-action.js';
 import { evaluateDependencies, routePreconditions } from '../engine/dependency-evaluator.js';
 import { decide } from '../engine/decision-engine.js';
 import { resolveDependencyFreshness } from '../engine/policy-resolver.js';
 import { defaultDeadlineForRisk } from '../engine/resolved-policy.js';
 import { newId, ID_PREFIXES } from '../domain/identifiers.js';
+import { refKey } from '../domain/state.js';
+import { redactDeep } from '../redaction/redact.js';
 
 export interface ExecutionOutcome {
   decision: DecisionRecord;
@@ -54,6 +57,8 @@ export async function executeAction(
   options: ExecuteOptions = {},
 ): Promise<ExecutionOutcome> {
   // ---- Escalation state machine guards ------------------------------------
+  // These run BEFORE validation: a replayed or held action id must not trigger
+  // provider fetches, persist a new action row, or audit a proposal.
   if (options.actionId && !options.viaApproval) {
     const escalation = await ctx.store.getEscalation(options.actionId);
     if (escalation) {
@@ -69,48 +74,51 @@ export async function executeAction(
     }
   }
 
+  // ---- Expiry + live-authorization replay guards (fail fast) --------------
+  if (options.actionId) {
+    const earlyAuth = await ctx.store.getAuthorization(options.actionId);
+    if (earlyAuth && earlyAuth.consumed_at === null && Date.parse(earlyAuth.expires_at) < ctx.clock.nowMs()) {
+      ctx.audit.append('action.expired', {
+        action_id: options.actionId,
+        reason: `authorization expired at ${earlyAuth.expires_at} before execution`,
+      });
+      throw new ActionExpiredError(options.actionId, earlyAuth.expires_at);
+    }
+    if (earlyAuth && earlyAuth.consumed_at === null) {
+      ctx.metrics.increment('replays_detected');
+      ctx.audit.append('action.replay_detected', {
+        action_id: options.actionId,
+        reason: 'a live authorization already exists for this action id',
+      });
+      throw new ReplayDetectedError(options.actionId, { authorized_at: earlyAuth.authorized_at });
+    }
+  }
+
   const validation = await validateAction(ctx, intentInput, { actionId: options.actionId });
   const intent = validation.intent;
   const policy = validation.policy;
 
-  // ---- Replay guard (spec §24) -------------------------------------------
+  // ---- Consumed-authorization guard (spec §24) ----------------------------
   const existingAuth = await ctx.store.getAuthorization(intent.action_id);
-  if (existingAuth && existingAuth.consumed_at === null && Date.parse(existingAuth.expires_at) < ctx.clock.nowMs()) {
-    ctx.audit.append('action.expired', {
-      action_id: intent.action_id,
-      reason: `authorization expired at ${existingAuth.expires_at} before execution`,
-    });
-    throw new ActionExpiredError(intent.action_id, existingAuth.expires_at);
-  }
-  if (existingAuth) {
-    if (existingAuth.consumed_at !== null) {
-      if (policy.execution.allowIdempotentRetry && executor.idempotency === 'idempotent') {
-        // Safe retry: a full fresh validation + execution happens below.
-        ctx.audit.append('action.validated', {
-          action_id: intent.action_id,
-          note: 'idempotent retry permitted by policy; prior authorization consumed',
-          execution_status: 'not_executed',
-        });
-      } else {
-        ctx.metrics.increment('replays_detected');
-        ctx.audit.append('action.replay_detected', {
-          action_id: intent.action_id,
-          agent_id: intent.agent_id,
-          reason: 'authorization already consumed; action cannot be replayed',
-        });
-        throw new ReplayDetectedError(intent.action_id, {
-          authorized_at: existingAuth.authorized_at,
-          consumed_at: existingAuth.consumed_at,
-        });
-      }
+  if (existingAuth && existingAuth.consumed_at !== null) {
+    if (policy.execution.allowIdempotentRetry && executor.idempotency === 'idempotent') {
+      // Safe retry: a full fresh validation + execution happens below.
+      ctx.audit.append('action.validated', {
+        action_id: intent.action_id,
+        note: 'idempotent retry permitted by policy; prior authorization consumed',
+        execution_status: 'not_executed',
+      });
     } else {
       ctx.metrics.increment('replays_detected');
       ctx.audit.append('action.replay_detected', {
         action_id: intent.action_id,
         agent_id: intent.agent_id,
-        reason: 'a live authorization already exists for this action id',
+        reason: 'authorization already consumed; action cannot be replayed',
       });
-      throw new ReplayDetectedError(intent.action_id, { authorized_at: existingAuth.authorized_at });
+      throw new ReplayDetectedError(intent.action_id, {
+        authorized_at: existingAuth.authorized_at,
+        consumed_at: existingAuth.consumed_at,
+      });
     }
   }
 
@@ -210,6 +218,9 @@ export async function executeAction(
   }
 
   // ---- Authorization (spec §24) -------------------------------------------
+  // The claim is atomic: if a live (unconsumed) authorization already exists
+  // for this action id, the claim is refused. This closes the check-then-insert
+  // window that two concurrent executions could otherwise both pass.
   const deadlineMs = policy.execution.deadlineMs ?? defaultDeadlineForRisk(intent.risk_level ?? 'MEDIUM');
   const nowMs = ctx.clock.nowMs();
   const expiresAt = new Date(nowMs + deadlineMs).toISOString();
@@ -222,7 +233,18 @@ export async function executeAction(
     consumed_at: null,
     policy_version: ctx.policyVersion,
   };
-  await ctx.store.saveAuthorization(auth);
+  const claim = await ctx.store.claimAuthorization(auth);
+  if (!claim.claimed) {
+    ctx.metrics.increment('replays_detected');
+    ctx.audit.append('action.replay_detected', {
+      action_id: intent.action_id,
+      agent_id: intent.agent_id,
+      reason: 'a live authorization already exists for this action id',
+    });
+    throw new ReplayDetectedError(intent.action_id, {
+      authorized_at: claim.existing?.authorized_at ?? null,
+    });
+  }
 
   // ---- TOCTOU re-verification immediately before the side effect ----------
   if (policy.execution.requireFreshAtExecution) {
@@ -238,6 +260,33 @@ export async function executeAction(
     });
     for (const snapshot of recheck.fetched) {
       await ctx.store.saveSnapshot(snapshot);
+    }
+    if (intent.dependencies.length > 0 && recheck.fetched.length === 0) {
+      // Every provider fetch failed during re-verification: the authorized
+      // fingerprint can no longer be compared against the world, so the
+      // safety basis of this execution is gone -> fail closed (invariant 7).
+      const blockedRecord = buildDecisionRecord({
+        ctx,
+        intent,
+        policy,
+        decision: 'DENY',
+        reason:
+          'pre-execution state re-verification could not be completed: every provider fetch failed; ' +
+          'failing closed (time-of-check/time-of-use protection)',
+        verdicts: recheck.verdicts,
+        deadlineMs,
+        revalidated: true,
+        computedAt: ctx.clock.nowMs(),
+      });
+      await ctx.store.saveDecision(blockedRecord);
+      ctx.audit.append('action.blocked', {
+        action_id: intent.action_id,
+        decision: 'DENY',
+        reason: blockedRecord.reason,
+        execution_status: 'blocked',
+        stage: 'toctou_recheck',
+      });
+      return { decision: blockedRecord, executed: false, result: null, revalidatedDecision };
     }
     const currentFingerprint = fingerprintOf(recheck.fetched);
     if (recheck.fetched.length > 0 && currentFingerprint !== validation.stateFingerprint) {
@@ -319,10 +368,13 @@ export async function executeAction(
   };
 
   // Authorization is consumed exactly once, together with the outcome.
+  // The persisted execution record carries redacted output; the live result
+  // returned to the caller is the executor's own.
   await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
-  await ctx.store.saveExecution(result);
+  const persistedResult: ExecutionResult = { ...result, output: redactDeep(result.output) };
+  await ctx.store.saveExecution(persistedResult);
 
-  const persistedDecision: DecisionRecord = { ...decision, execution: result };
+  const persistedDecision: DecisionRecord = { ...decision, execution: persistedResult };
 
   ctx.metrics.observeExecutionLatency(result.duration_ms);
   ctx.audit.append(result.success ? 'action.executed' : 'action.failed', {
@@ -361,6 +413,43 @@ export async function executeApprovedAction(
     });
     throw new ReplayDetectedError(actionId, { reason: `escalation status is ${escalation.status}` });
   }
+
+  // ---- Approval binding (authorization binds to approved semantics) -------
+  // The human approved a specific action, not an action id that can later be
+  // re-pointed at a different target, operation, or dependency set. The
+  // submitted intent must match the semantics of the decision that was
+  // escalated; otherwise the approval cannot be reused to execute it.
+  const originalDecision = await ctx.store.getDecision(escalation.decision_id);
+  if (!originalDecision) {
+    throw new UnauthorizedActionError(
+      `escalation for action ${actionId} references missing decision ${escalation.decision_id}`,
+    );
+  }
+  const submitted = normalizeIntent(intentInput, ctx.clock.nowMs());
+  const originalDeps = originalDecision.verdicts.map((v) => refKey(v.dependency)).sort();
+  const submittedDeps = submitted.dependencies.map((d) => refKey(d)).sort();
+  const sameSemantics =
+    originalDecision.tool === submitted.tool &&
+    originalDecision.operation === submitted.operation &&
+    (originalDecision.target ?? null) === (submitted.target ?? null) &&
+    originalDeps.length === submittedDeps.length &&
+    originalDeps.every((key, index) => key === submittedDeps[index]);
+  if (!sameSemantics) {
+    ctx.audit.append('action.blocked', {
+      action_id: actionId,
+      decision: 'ESCALATE',
+      execution_status: 'blocked',
+      reason:
+        'escalation approval does not match the submitted action semantics; ' +
+        'an approval binds to the originally approved operation, target, and dependencies',
+    });
+    throw new UnauthorizedActionError(
+      `submitted action does not match the approved escalation for ${actionId}: ` +
+        `approval binds to operation "${originalDecision.operation}", target "${originalDecision.target ?? 'none'}", ` +
+        `dependencies [${originalDeps.join(', ')}]`,
+    );
+  }
+
   ctx.audit.append('action.validated', {
     action_id: actionId,
     note: `executing approved escalation (approved by ${escalation.resolved_by ?? 'unknown'}); freshness is re-verified`,

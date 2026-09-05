@@ -85,37 +85,29 @@ export class HttpStateProvider implements StateProvider {
     });
 
     if (response.status === 304) {
-      // A 304 carries no body. If the configuration maps metadata fields
-      // (needed for precondition evaluation) and the agent did not declare
-      // them, fall back to a full fetch: preconditions must be verified
-      // against real current state, not assumed.
-      const configuredPaths = Object.keys(config.metadata_paths ?? {});
-      const metadataUsable =
-        configuredPaths.length === 0 ||
-        configuredPaths.every((key) =>
-          Object.prototype.hasOwnProperty.call(ref.metadata ?? {}, key),
-        );
-      if (metadataUsable) {
-        const provenance: StateProvenance = {
-          provider: this.name,
-          retrieved_at: nowIso,
-          time_source: 'client',
-          validation_method: 'conditional_304',
-        };
-        return {
-          snapshot_id: newId(ID_PREFIXES.snapshot, Date.parse(nowIso)),
-          source: ref.source,
-          resource: ref.resource,
-          resource_id: ref.resource_id,
-          observed_at: ref.observed_at ?? nowIso,
-          version: ref.version,
-          content_hash: ref.content_hash,
-          metadata: ref.metadata,
-          provenance,
-          unchanged_since_observed: true,
-        };
-      }
-      return this.getState(ref, nowIso);
+      // A 304 attests "unchanged since <etag>" — it carries NO content the
+      // server vouches for. Preconditions therefore can never be evaluated on
+      // this path (the firewall forces a full fetch when preconditions are
+      // routed here), and the snapshot must not echo agent-supplied metadata
+      // as if it were current state.
+      const provenance: StateProvenance = {
+        provider: this.name,
+        retrieved_at: nowIso,
+        time_source: 'client',
+        validation_method: 'conditional_304',
+      };
+      return {
+        snapshot_id: newId(ID_PREFIXES.snapshot, Date.parse(nowIso)),
+        source: ref.source,
+        resource: ref.resource,
+        resource_id: ref.resource_id,
+        observed_at: ref.observed_at ?? nowIso,
+        version: ref.version,
+        content_hash: ref.content_hash,
+        metadata: {},
+        provenance,
+        unchanged_since_observed: true,
+      };
     }
     if (response.ok) {
       const bodyText = await response.text();

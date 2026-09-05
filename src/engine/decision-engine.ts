@@ -171,7 +171,10 @@ export function decide(input: DecisionInput): DecisionOutput {
   }
 
   const decision = toDecisionType(outcome);
-  const reason = explainDecision(basis, outcome, policy, intent, verdicts, risk);
+  let reason = explainDecision(basis, outcome, policy, intent, verdicts, risk);
+  if (policy.requireDependencies && verdicts.length === 0) {
+    reason += ' Policy requires declared dependencies (require_dependencies) and none were provided.';
+  }
 
   return {
     decision,

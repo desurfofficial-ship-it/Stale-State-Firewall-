@@ -141,16 +141,24 @@ describe('race conditions: time-of-check vs time-of-use', () => {
       },
     };
 
-    const first = h.firewall.execute(intent, slowExecutor, { actionId: 'act_race_4' });
+    // Attach rejection handlers at creation time: a replay rejection that
+    // lands before allSettled is registered would surface as an unhandled
+    // rejection and pollute the run.
+    const settle = (p: Promise<unknown>) =>
+      p.then(
+        () => ({ status: 'fulfilled' as const }),
+        () => ({ status: 'rejected' as const }),
+      );
+    const first = settle(h.firewall.execute(intent, slowExecutor, { actionId: 'act_race_4' }));
     await new Promise((resolve) => setTimeout(resolve, 5));
-    const second = h.firewall.execute(intent, slowExecutor, { actionId: 'act_race_4' });
+    const second = settle(h.firewall.execute(intent, slowExecutor, { actionId: 'act_race_4' }));
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     release(null);
-    const [r1, r2] = await Promise.allSettled([first, second]);
+    const [r1, r2] = await Promise.all([first, second]);
 
-    const statuses = [r1, r2].map((r) => (r.status === 'fulfilled' ? 'executed' : 'rejected'));
-    expect(statuses).toContain('executed');
+    const statuses = [r1, r2].map((r) => r!.status);
+    expect(statuses).toContain('fulfilled');
     expect(statuses).toContain('rejected');
   });
 

@@ -59,6 +59,8 @@ export class InMemoryStateProvider implements StateProvider {
   /**
    * Registers or replaces a resource. When `version` is omitted a monotonic
    * v-counter is used; fixtures and tests may pin explicit versions.
+   * `serverTimeIso` marks the resource as carrying a provider-server stamp
+   * (provenance time_source "server") for the given observation timestamp.
    */
   put(
     resource: string,
@@ -66,6 +68,7 @@ export class InMemoryStateProvider implements StateProvider {
     metadata: Record<string, unknown>,
     updatedAtIso: string,
     version?: string,
+    serverTimeIso?: string,
   ): void {
     const key = this.key(resource, resourceId);
     const existing = this.resources.get(key);
@@ -74,6 +77,7 @@ export class InMemoryStateProvider implements StateProvider {
       version: version ?? (existing ? existing.version : `v${this.versionCounter}`),
       metadata,
       updated_at: updatedAtIso,
+      server_time: serverTimeIso ?? existing?.server_time,
       supports_conditional: existing?.supports_conditional ?? true,
     });
   }

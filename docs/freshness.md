@@ -38,6 +38,8 @@ Age of the agent's observation (`now - observed_at`) against `max_age`.
 - `age >= max_age` → STALE
 - missing/unparseable `observed_at` → UNKNOWN
 - `observed_at` in the future beyond `clock_skew_tolerance` → UNKNOWN (fabricated or broken clock; never FRESH)
+- **server-stamped drift**: when the provider's current state carries a server timestamp (`time_source: server`) that is NEWER than the claimed `observed_at` (beyond skew tolerance) → INVALID. The world demonstrably changed after the agent claims to have observed it.
+- **honest boundary**: when the agent declares no version/hash and the state itself is unchanged, the claimed timestamp cannot be independently verified — TTL freshness on unversioned dependencies is anchored to the agent's claim (see docs/limitations.md). Policies that need verified freshness should require `version` or `hash` strategy for untrusted agents.
 
 ### version
 

@@ -11,7 +11,15 @@ export function canonicalJson(value: unknown): string {
 }
 
 function serialize(value: unknown): string {
-  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+  if (typeof value === 'number') {
+    // Non-finite numbers must not coerce to null (JSON.stringify would emit
+    // "null"), otherwise `equals` would treat NaN/Infinity as equal to null.
+    if (!Number.isFinite(value)) {
+      return JSON.stringify(`__nonfinite:${String(value)}`);
+    }
+    return JSON.stringify(value);
+  }
+  if (value === null || typeof value === 'boolean') {
     return JSON.stringify(value);
   }
   if (typeof value === 'string') {
