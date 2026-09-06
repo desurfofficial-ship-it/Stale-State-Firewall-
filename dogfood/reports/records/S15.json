@@ -1,0 +1,29 @@
+{
+  "id": "S15",
+  "title": "Internal agent development workflow — friction and error clarity",
+  "started_at": "2026-09-06T03:23:16.766Z",
+  "duration_ms": 13,
+  "verdict": "PASS_WITH_FRICTION",
+  "expected": "a realistic multi-tool workflow integrates naturally; friction measured; errors agent-understandable",
+  "actual": "workflow completed end to end; DF-F1 (protect() could not express conditional execution) is RESOLVED — the ergonomic path now forwards the authorized expected state to the provider CAS and the audit records provider-enforced execution; remaining friction: refusal messages do not consistently answer \"is a retry safe\" (step5 retry-signal=false); legacy-path actions still require hand-built executors; errors name state/versions/policies (agent-usable); audit reconstructable",
+  "observations": [
+    "audit totals: {\"proposed\":5,\"executed\":4,\"blocked\":1,\"failed\":0,\"condition_failed\":0,\"replays\":0}",
+    "ERROR SCORE [step5 stale claim refused]: what=true why=true retry-signal=false fresh-state=true human=false",
+    "latency: protected-edit ~5.2ms (includes validation); legacy execution p50=0.00ms",
+    "audit tail sample (human reconstruction aid): [\"action.blocked: policy \\\"deploy-staging\\\": required dependency is INVALID — dev:deployment/api/staging is IN\",\"action.validated: policy \\\"deploy-staging\\\": required dependency is INVALID — dev:deployment/api/staging is IN\",\"action.proposed: \",\"action.executed: executed under provider-enforced conditional execution: the external system verified the a\",\"action.validated: policy \\\"deploy-staging\\\":"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "agent claimed green CI after it went red — precondition/staleness refusal",
+      "at": "2026-09-06T03:23:16.777Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": []
+  },
+  "notes": "Friction inventory (post DF-F1 fix): (1) refusal messages could name the retry contract explicitly; (2) refKey not exported as a runtime helper; (3) legacy-path actions require the integrator to hand-build executors; (4) DEFAULT storage path ./ssf-state.db is a shared-state trap for newcomers (S02 lesson)."
+}

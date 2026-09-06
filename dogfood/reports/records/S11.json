@@ -1,0 +1,51 @@
+{
+  "id": "S11",
+  "title": "Target tampering — authorization binds the target",
+  "started_at": "2026-09-06T03:09:27.730Z",
+  "duration_ms": 9,
+  "verdict": "PASS",
+  "expected": "authorized target A / execution target B is DENIED in both matrix directions",
+  "actual": "both tampering directions refused by the approval binding with audited reasons; the approved action id cannot be re-pointed",
+  "observations": [
+    "escalation approved for target db/tables/users (single-row 42)",
+    "same state + different target -> REFUSED: submitted action does not match the approved escalation for act_s11_esc: approval binds to operation \"purge_table\", target \"db/tab",
+    "same target + different state -> REFUSED: submitted action does not match the approved escalation for act_s11_esc: approval binds to operation \"purge_table\", target \"db/tab",
+    "audit records 2 blocked tampering attempts with reasons"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "approval binding covers the target",
+      "at": "2026-09-06T03:09:27.739Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "approval binding covers the authorized state (dependency refs)",
+      "at": "2026-09-06T03:09:27.739Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [
+    {
+      "context": "target tampering under approved escalation",
+      "name": "UnauthorizedActionError",
+      "message": "submitted action does not match the approved escalation for act_s11_esc: approval binds to operation \"purge_table\", target \"db/tables/users\", dependencies [db:table/no-such-provider]",
+      "code": "SSF_UNAUTHORIZED",
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "state tampering under approved escalation",
+      "name": "UnauthorizedActionError",
+      "message": "submitted action does not match the approved escalation for act_s11_esc: approval binds to operation \"purge_table\", target \"db/tables/users\", dependencies [db:table/no-such-provider]",
+      "code": "SSF_UNAUTHORIZED",
+      "details": null,
+      "decision_reason": null
+    }
+  ],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": []
+  },
+  "notes": null
+}

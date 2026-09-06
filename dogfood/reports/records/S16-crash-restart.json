@@ -1,0 +1,39 @@
+{
+  "id": "S16-crash-restart",
+  "title": "Crash/restart durability — §28 database durability + §29 crash recovery",
+  "started_at": "2026-09-06T03:09:28.235Z",
+  "duration_ms": 3365,
+  "verdict": "PASS",
+  "expected": "crashes leave consistent durable state: no false executed records, no double claims, replay-safe orphaned claims, honest unknown outcomes",
+  "actual": "Case A (pre-apply crash): no side effect, orphaned claim durable, retry refused; Case B (post-apply crash): side effect occurred but no success recorded, chain verifies, retry refused, fresh action id proceeds — reconciliation requires fresh read (documented)",
+  "observations": [
+    "A: process killed after authorization claim, while the conditional PUT was in flight (pre-apply)",
+    "A: external truth: zero mutations (nothing happened)",
+    "A: audit after restart: action.validated, action.proposed; chain ok",
+    "A: blind retry after restart refused (ReplayDetectedError) — the operator reconciles with a NEW action id and fresh state",
+    "B: server applied the mutation and is HOLDING the response; client killed while awaiting it — the firewall can never record the outcome",
+    "B: external truth: the mutation WAS applied — but the firewall died before recording it",
+    "B: audit after restart: action.validated, action.proposed (no action.executed — the firewall never claims what it did not observe)",
+    "B: blind retry refused; fresh read reconciles the external world (revision advanced) before any new attempt",
+    "B: a fresh action id claims and executes normally — no stuck state, no double-claim corruption"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "orphaned claim after crash is durable and replay-safe",
+      "at": "2026-09-06T03:09:28.418Z"
+    },
+    {
+      "classification": "UNKNOWN",
+      "detail": "crash after apply = unknown external outcome; persisted state is consistent and replay-safe; reconciliation requires a fresh read (documented)",
+      "at": "2026-09-06T03:09:31.568Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": []
+  },
+  "notes": null
+}

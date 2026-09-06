@@ -63,6 +63,8 @@ Pinning `actionId` across attempts enables replay detection: a second execute wi
 
 ## protect(spec) — wrapping a tool
 
+> **Dogfood finding DF-F1 — RESOLVED:** `protect()` originally wrapped tools in a legacy-path executor only, leaving provider-enforced conditional execution unreachable through the most ergonomic API. The spec now accepts `conditionalExecutionSupported` and `conditionalRun`, so a protected tool CAN take the provider-enforced CAS path. Tools that declare no conditional hooks keep the legacy path (`conditional_execution: 'not_attempted'`) and are blocked under `require_conditional_execution: true` policies (fail closed), exactly as before.
+
 ```ts
 const deploy = firewall.protect({
   name: 'deployer',                       // unique within the firewall
@@ -71,19 +73,36 @@ const deploy = firewall.protect({
   idempotency: 'non_idempotent',
   atomicity: 'not_guaranteed',
 });
-
-try {
-  await deploy.execute(input);            // BlockedActionError when not allowed
-} catch (e) {
-  if (e instanceof BlockedActionError) {
-    console.log(e.decision.decision, e.decision.reason);
-  }
-}
-
-await deploy.check(input);                // dry-run variant
 ```
 
-`BlockedActionError` carries the full `DecisionRecord`. The raw tool is only reachable inside the firewall's executor closure.
+To reach the provider-enforced guarantee through `protect()`, declare how the
+tool performs its side effect CONDITIONED on the authorized expected state.
+The hook receives the authorized versions captured at validation time and
+MUST forward them to the external system (ETag / expected SHA / CAS) — never
+a fresh read:
+
+```ts
+const editFile = firewall.protect({
+  name: 'github-file-edit',
+  run: async (input) => { /* legacy best-effort fallback */ },
+  toIntent: (input) => ({ /* ...dependencies: [{ source: 'github', resource: 'file', ..., version: input.observedSha }] */ }),
+  atomicity: 'guaranteed',
+  conditionalExecutionSupported: true,
+  conditionalRun: async (input, expectedState) => {
+    const entry = expectedState.find((e) => e.ref === `github:file/${input.repo}@${input.path}`);
+    if (!entry?.version) return { applied: false, error: 'no authorized expected state' };
+    const res = await githubCasWrite(input.repo, input.path, entry.version, input.content);
+    return res.applied
+      ? { applied: true, output: res.commit }
+      : { applied: false, ref: entry.ref, observed_version: res.currentSha, error: res.message };
+  },
+});
+```
+
+Return `{ applied: true }` when the provider's condition held and the operation
+was applied; `{ applied: false, ... }` when the provider refused (recorded as a
+condition failure, the authorization is invalidated, and a fresh evaluation is
+required — never a blind retry).
 
 ## Escalations
 

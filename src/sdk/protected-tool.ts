@@ -10,7 +10,7 @@
  * the same tool name twice, closing accidental dual-path bypasses.
  */
 
-import type { ActionIntentInput, ActionExecutor, IdempotencyKind } from '../domain/action.js';
+import type { ActionIntentInput, ActionExecutor, ExpectedStateEntry, ExecutionResult, IdempotencyKind } from '../domain/action.js';
 import type { DecisionRecord } from '../domain/decision.js';
 import type { StateDependencyInput } from '../domain/state.js';
 import { FirewallError } from '../domain/errors.js';
@@ -19,17 +19,44 @@ import type { StaleStateFirewall } from './firewall.js';
 /** Raised when the firewall did not authorize the protected execution. */
 export class BlockedActionError extends FirewallError {
   readonly decision: DecisionRecord;
+  /**
+   * The recorded execution result when the action was authorized but the
+   * side effect failed (e.g. a provider condition failure). Agents can read
+   * `conditional_execution`, `observed_version`, and `error` to decide the
+   * next step (fresh re-evaluation — never a blind retry).
+   */
+  readonly execution?: ExecutionResult;
 
-  constructor(decision: DecisionRecord) {
+  constructor(decision: DecisionRecord, execution?: ExecutionResult) {
     super({
       code: 'SSF_ACTION_BLOCKED',
       message: `action blocked by Stale-State Firewall: ${decision.decision} (${decision.reason})`,
-      details: { decision_id: decision.decision_id, action_id: decision.action_id },
+      details: {
+        decision_id: decision.decision_id,
+        action_id: decision.action_id,
+        ...(execution?.conditional_execution
+          ? { conditional_execution: execution.conditional_execution }
+          : {}),
+      },
     });
     this.name = 'BlockedActionError';
     this.decision = decision;
+    this.execution = execution;
   }
 }
+
+/** Outcome of a ProtectedTool conditional run (dogfood finding DF-F1). */
+export type ConditionalRunOutcome<O> =
+  | { applied: true; output: O }
+  | {
+      applied: false;
+      /** The provider's refusal message (recorded in the audit trail). */
+      error?: string;
+      /** The ref whose authorized expected state did not hold (DF-4). */
+      ref?: string | null;
+      /** The version the external system reported at conditional time. */
+      observed_version?: string | null;
+    };
 
 export interface ProtectedToolSpec<I, O> {
   /** Unique tool identity inside this firewall instance. */
@@ -42,6 +69,23 @@ export interface ProtectedToolSpec<I, O> {
   idempotency?: IdempotencyKind | ((input: I) => IdempotencyKind);
   /** Whether the underlying system enforces compare-and-swap semantics. */
   atomicity?: 'guaranteed' | 'not_guaranteed';
+  /**
+   * Declares that this tool performs its side effect through a provider
+   * compare-and-swap when given the authorized expected state. Default:
+   * false (legacy best-effort path).
+   */
+  conditionalExecutionSupported?: boolean | ((input: I) => boolean);
+  /**
+   * Performs the side effect CONDITIONED on the authorized expected state
+   * (dogfood finding DF-F1: without this hook the most ergonomic integration
+   * API could not reach the provider-enforced CAS guarantee). The hook MUST
+   * forward the authorized versions to the external system — never re-read
+   * current state. Return `applied: false` when the provider refused.
+   */
+  conditionalRun?: (
+    input: I,
+    expectedState: readonly ExpectedStateEntry[],
+  ) => Promise<ConditionalRunOutcome<O>>;
 }
 
 export interface ProtectedTool<I, O> {
@@ -75,6 +119,25 @@ export function createProtectedTool<I, O>(
       const output = await spec.run(input);
       return { success: true, output };
     },
+    ...(spec.conditionalRun
+      ? {
+          conditionalExecutionSupported: () =>
+            typeof spec.conditionalExecutionSupported === 'function'
+              ? spec.conditionalExecutionSupported(input)
+              : (spec.conditionalExecutionSupported ?? true),
+          conditionalExecute: async (_intent, expectedState) => {
+            const run = await spec.conditionalRun!(input, expectedState);
+            return run.applied
+              ? { condition: 'satisfied' as const, success: true, output: run.output }
+              : {
+                  condition: 'failed' as const,
+                  ref: run.ref ?? null,
+                  observed_version: run.observed_version ?? null,
+                  error: run.error,
+                };
+          },
+        }
+      : {}),
   });
 
   return {
@@ -88,7 +151,7 @@ export function createProtectedTool<I, O>(
     async execute(input: I): Promise<O> {
       const outcome = await firewall.executeProtected(buildIntentInput(input), executorFor(input));
       if (!outcome.executed || !outcome.result || !outcome.result.success) {
-        throw new BlockedActionError(outcome.decision);
+        throw new BlockedActionError(outcome.decision, outcome.result ?? undefined);
       }
       return outcome.result.output as O;
     },

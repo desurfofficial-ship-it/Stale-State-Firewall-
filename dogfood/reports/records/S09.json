@@ -1,0 +1,47 @@
+{
+  "id": "S09",
+  "title": "Replay — one authorization, one execution",
+  "started_at": "2026-09-06T03:09:27.430Z",
+  "duration_ms": 140,
+  "verdict": "PASS",
+  "expected": "exactly one execution per authorization: sequential, concurrent, cross-store, and after condition failure",
+  "actual": "sequential replay refused; concurrent replay 1 winner / 1 rejected; shared-store claim race yields exactly one winner; post-condition-failure replay refused; replays audited",
+  "observations": [
+    "first execution: satisfied",
+    "second execution rejected: ReplayDetectedError: replay detected for action act_s09; authorization cannot be reused",
+    "concurrent replay: 1 executed, 1 rejected (ReplayDetectedError)",
+    "shared-store concurrent claim: winner executed, loser refused (ReplayDetectedError)",
+    "replay after condition failure refused: ReplayDetectedError"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "replay after execution refused; exactly one mutation in the provider log",
+      "at": "2026-09-06T03:09:27.439Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "atomic authorization claim closes the check-then-insert window",
+      "at": "2026-09-06T03:09:27.440Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [
+    {
+      "context": "sequential replay",
+      "name": "ReplayDetectedError",
+      "message": "replay detected for action act_s09; authorization cannot be reused",
+      "code": "SSF_REPLAY_DETECTED",
+      "details": {
+        "authorized_at": "2026-09-06T03:09:27.437Z",
+        "consumed_at": "2026-09-06T03:09:27.438Z"
+      },
+      "decision_reason": null
+    }
+  ],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": []
+  },
+  "notes": null
+}

@@ -1,0 +1,206 @@
+{
+  "id": "S07",
+  "title": "Provider outage — faults during fetch and conditional execution",
+  "started_at": "2026-09-06T03:08:56.098Z",
+  "duration_ms": 9341,
+  "verdict": "PASS",
+  "expected": "provider faults fail closed everywhere; no unsafe success; no ambiguous ALLOW; no blind retry; provider errors are distinct from condition failures",
+  "actual": "all 6 validation faults surface typed errors and DENY for every risk level; all 6 mutation faults record failure with UNKNOWN condition outcome (never satisfied/never executed); retry of the faulted authorization refused",
+  "observations": [
+    "sandbox server on 45407 (outage + putfail namespaces)",
+    "A/hang: decision=REVALIDATE, unknown verdicts=1, reason=policy \"http-update\": state validity could not be established — http:res_hang/r1 is UNKNOWN (current",
+    "A/500: decision=REVALIDATE, unknown verdicts=1, reason=policy \"http-update\": state validity could not be established — http:res_500/r1 is UNKNOWN (current ",
+    "A/503: decision=REVALIDATE, unknown verdicts=1, reason=policy \"http-update\": state validity could not be established — http:res_503/r1 is UNKNOWN (version ",
+    "A/429: decision=REVALIDATE, unknown verdicts=1, reason=policy \"http-update\": state validity could not be established — http:res_429/r1 is UNKNOWN (current ",
+    "A/reset: decision=REVALIDATE, unknown verdicts=1, reason=policy \"http-update\": state validity could not be established — http:res_reset/r1 is UNKNOWN (curren",
+    "A/garbage: decision=REVALIDATE, unknown verdicts=1, reason=policy \"http-update\": state validity could not be established — http:res_garbage/r1 is UNKNOWN (curr",
+    "risk LOW: executed=false, final decision=DENY (fail closed)",
+    "risk MEDIUM: executed=false, final decision=DENY (fail closed)",
+    "risk HIGH: executed=false, final decision=DENY (fail closed)",
+    "risk CRITICAL: executed=false, final decision=DENY (fail closed)",
+    "B/hang: executed=true, success=false, conditional=n/a",
+    "B/hang: audit event=action.failed, note=the conditional operation did not complete; whether the provider evaluated the condition is unknown",
+    "B/500: executed=true, success=false, conditional=n/a",
+    "B/500: audit event=action.failed, note=the conditional operation did not complete; whether the provider evaluated the condition is unknown",
+    "B/503: executed=true, success=false, conditional=n/a",
+    "B/503: audit event=action.failed, note=the conditional operation did not complete; whether the provider evaluated the condition is unknown",
+    "B/429: executed=true, success=false, conditional=n/a",
+    "B/429: audit event=action.failed, note=the conditional operation did not complete; whether the provider evaluated the condition is unknown",
+    "B/reset: executed=true, success=false, conditional=n/a",
+    "B/reset: audit event=action.failed, note=the conditional operation did not complete; whether the provider evaluated the condition is unknown",
+    "B/garbage: executed=true, success=false, conditional=n/a",
+    "B/garbage: audit event=action.failed, note=the conditional operation did not complete; whether the provider evaluated the condition is unknown",
+    "retry of faulted authorization refused: ReplayDetectedError"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "provider hang during validation resolved to UNKNOWN -> REVALIDATE (fail closed)",
+      "at": "2026-09-06T03:08:56.860Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "provider 500 during validation resolved to UNKNOWN -> REVALIDATE (fail closed)",
+      "at": "2026-09-06T03:08:56.868Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "provider 503 during validation resolved to UNKNOWN -> REVALIDATE (fail closed)",
+      "at": "2026-09-06T03:08:56.873Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "provider 429 during validation resolved to UNKNOWN -> REVALIDATE (fail closed)",
+      "at": "2026-09-06T03:08:56.876Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "provider reset during validation resolved to UNKNOWN -> REVALIDATE (fail closed)",
+      "at": "2026-09-06T03:08:56.880Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "provider garbage during validation resolved to UNKNOWN -> REVALIDATE (fail closed)",
+      "at": "2026-09-06T03:08:56.883Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "mutation hang recorded as failure with UNKNOWN condition outcome",
+      "at": "2026-09-06T03:09:00.400Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "mutation 500 recorded as failure with UNKNOWN condition outcome",
+      "at": "2026-09-06T03:09:00.407Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "mutation 503 recorded as failure with UNKNOWN condition outcome",
+      "at": "2026-09-06T03:09:00.416Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "mutation 429 recorded as failure with UNKNOWN condition outcome",
+      "at": "2026-09-06T03:09:00.423Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "mutation reset recorded as failure with UNKNOWN condition outcome",
+      "at": "2026-09-06T03:09:05.429Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "mutation garbage recorded as failure with UNKNOWN condition outcome",
+      "at": "2026-09-06T03:09:05.435Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "authorization consumed by the faulted attempt; blind retry impossible",
+      "at": "2026-09-06T03:09:05.439Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [
+    {
+      "context": "validation fetch failure (hang)",
+      "name": "Error",
+      "message": "policy \"http-update\": state validity could not be established — http:res_hang/r1 is UNKNOWN (current state could not be established: provider \"http\" unavailable: The operation was aborted due to timeout). Fail-safe behavior for risk HIGH. Decision: REVALIDATE.",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "validation fetch failure (500)",
+      "name": "Error",
+      "message": "policy \"http-update\": state validity could not be established — http:res_500/r1 is UNKNOWN (current state could not be established: provider \"http\" unavailable: GET http://127.0.0.1:45407/outage/r1 failed with HTTP 500). Fail-safe behavior for risk HIGH. Decision: REVALIDATE.",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "validation fetch failure (503)",
+      "name": "Error",
+      "message": "policy \"http-update\": state validity could not be established — http:res_503/r1 is UNKNOWN (version strategy requires the agent to declare the version it observed, but none was provided). Fail-safe behavior for risk HIGH. Decision: REVALIDATE.",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "validation fetch failure (429)",
+      "name": "Error",
+      "message": "policy \"http-update\": state validity could not be established — http:res_429/r1 is UNKNOWN (current state could not be established: provider \"http\" unavailable: GET http://127.0.0.1:45407/outage/r1 failed with HTTP 429). Fail-safe behavior for risk HIGH. Decision: REVALIDATE.",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "validation fetch failure (reset)",
+      "name": "Error",
+      "message": "policy \"http-update\": state validity could not be established — http:res_reset/r1 is UNKNOWN (current state could not be established: provider \"http\" unavailable: fetch failed). Fail-safe behavior for risk HIGH. Decision: REVALIDATE.",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "validation fetch failure (garbage)",
+      "name": "Error",
+      "message": "policy \"http-update\": state validity could not be established — http:res_garbage/r1 is UNKNOWN (current state could not be established: provider \"http\" unavailable: fetch failed). Fail-safe behavior for risk HIGH. Decision: REVALIDATE.",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "mutation outage (hang)",
+      "name": "Error",
+      "message": "provider \"http\" unavailable: The operation was aborted due to timeout",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "mutation outage (500)",
+      "name": "Error",
+      "message": "provider \"http\" unavailable: conditional mutation on http://127.0.0.1:45407/putfail/r1 failed with HTTP 500",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "mutation outage (503)",
+      "name": "Error",
+      "message": "provider \"http\" unavailable: conditional mutation on http://127.0.0.1:45407/putfail/r1 failed with HTTP 503",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "mutation outage (429)",
+      "name": "Error",
+      "message": "provider \"http\" unavailable: conditional mutation on http://127.0.0.1:45407/putfail/r1 failed with HTTP 429",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "mutation outage (reset)",
+      "name": "Error",
+      "message": "provider \"http\" unavailable: The operation was aborted due to timeout",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    },
+    {
+      "context": "mutation outage (garbage)",
+      "name": "Error",
+      "message": "provider \"http\" unavailable: fetch failed",
+      "code": null,
+      "details": null,
+      "decision_reason": null
+    }
+  ],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": []
+  },
+  "notes": null
+}

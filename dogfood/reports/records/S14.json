@@ -1,0 +1,43 @@
+{
+  "id": "S14",
+  "title": "HTTP real-world — If-Match semantics and the operator trust boundary",
+  "started_at": "2026-09-06T03:09:27.916Z",
+  "duration_ms": 140,
+  "verdict": "FINDING",
+  "expected": "correct server: match->apply, mismatch->412 no mutation; broken server: trust boundary made visible; weak ETag semantics noted",
+  "actual": "Case A applied; Case B-race refused by the server (412) with condition_failed; Case C stale write LANDED on the If-Match-ignoring server with firewall recording satisfied — the documented operator-verification boundary is real and was demonstrated end to end",
+  "observations": [
+    "Case B raw: executed=false, decision=DENY, conditional=n/a",
+    "Case B-race: server refused (412), agent mutation did NOT land; condition failure recorded",
+    "Case C raw: executed=true, conditional=satisfied",
+    "Case C: server truth shows 2 mutations — the STALE agent write LANDED on the broken server"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "a correct RFC 9110 server enforced the precondition",
+      "at": "2026-09-06T03:09:28.039Z"
+    },
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "broken server: no real CAS; firewall representation is honestly blind here",
+      "at": "2026-09-06T03:09:28.052Z"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P2-DOC",
+      "text": "CONFIRMED TRUST BOUNDARY (documented): with a server that ignores If-Match, the firewall records condition=satisfied and atomicity=guaranteed while the provider enforced nothing — the stale write landed. The firewall CANNOT detect this (it does not wiretap the server); the docs require the operator to verify If-Match enforcement per endpoint. Dogfood recommendation: keep this boundary loud in docs/providers.md and surface the operator-verification duty in the config comment (already present)."
+    }
+  ],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": [
+      6,
+      6,
+      6
+    ]
+  },
+  "notes": "Case B (plain stale-at-validation) resolves as INVALID->DENY before any request; the interesting 412 path needs the mid-execution race (Case B-race)."
+}

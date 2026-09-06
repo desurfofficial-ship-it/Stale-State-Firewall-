@@ -35,9 +35,12 @@ import { sha256Hex } from '../../engine/hashing.js';
 import { ProviderUnavailableError, ProviderResponseError } from '../../domain/errors.js';
 
 export interface GitHubProviderOptions {
-  apiBase: string;
-  timeoutMs: number;
-  includeReviews: boolean;
+  /** API base URL; defaults to https://api.github.com (dogfood finding DF-1: now optional). */
+  apiBase?: string;
+  /** Request timeout in ms; defaults to 5000 (dogfood finding DF-1: now optional). */
+  timeoutMs?: number;
+  /** Include pull-request review aggregation; defaults to true (dogfood finding DF-1: now optional). */
+  includeReviews?: boolean;
   /** Injectable fetch (tests run a simulated GitHub API); defaults to global fetch. */
   fetchImpl?: typeof fetch;
   token?: string;
@@ -85,11 +88,21 @@ function parseResourceId(resource: string, resourceId: string): ParsedId {
 
 export class GitHubStateProvider implements StateProvider {
   readonly name = 'github';
-  private readonly options: GitHubProviderOptions;
+  private readonly options: Required<Pick<GitHubProviderOptions, 'apiBase' | 'timeoutMs' | 'includeReviews'>> & GitHubProviderOptions;
   private readonly etags = new Map<string, string>();
 
   constructor(options: GitHubProviderOptions) {
-    this.options = options;
+    // Dogfood finding DF-1: this provider is a public export, and a consumer
+    // constructing it directly (the documented SDK path) previously got NO
+    // defaults — an omitted timeoutMs made every request fail with
+    // AbortSignal.timeout(undefined) ("delay argument must be a number").
+    // Apply the same defaults the config-assembled path uses.
+    this.options = {
+      ...options,
+      apiBase: options.apiBase ?? 'https://api.github.com',
+      timeoutMs: options.timeoutMs ?? 5000,
+      includeReviews: options.includeReviews ?? true,
+    };
   }
 
   supports(ref: { source: string; resource: string }): boolean {
@@ -415,6 +428,14 @@ export class GitHubStateProvider implements StateProvider {
         return `${base}/commits/${parsed.sha}/status`;
       case 'release':
         return `${base}/releases/tags/${encodeURIComponent(parsed.tag ?? '')}`;
+      case 'file':
+        // Dogfood finding DF-2: 'file' previously fell through to the repo
+        // root, so every conditional (If-None-Match) fetch of a file compared
+        // the claimed blob sha against the REPO object's weak etag and
+        // classified real GitHub files INVALID (fail-closed, but it made the
+        // file CAS guarantee unusable against the real API). Route to the
+        // same URL fetchFile() uses.
+        return `${base}/contents/${encodePath(parsed.path ?? '')}`;
       default:
         return base;
     }

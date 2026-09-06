@@ -10,7 +10,7 @@
 export { StaleStateFirewall } from './sdk/firewall.js';
 export type { FirewallOptions, EscalationResolution, StateInspectionResult } from './sdk/firewall.js';
 export { createProtectedTool, BlockedActionError } from './sdk/protected-tool.js';
-export type { ProtectedTool, ProtectedToolSpec } from './sdk/protected-tool.js';
+export type { ProtectedTool, ProtectedToolSpec, ConditionalRunOutcome } from './sdk/protected-tool.js';
 
 // Domain model
 export type {

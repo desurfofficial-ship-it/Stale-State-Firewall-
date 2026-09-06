@@ -10,3 +10,6 @@ ssf-state.db-shm
 .env
 .env.*
 !.env.example
+
+# Dogfood runtime state (resettable; records + telemetry are committed, DBs/WALs/logs are not)
+dogfood/reports/state/

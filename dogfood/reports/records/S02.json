@@ -1,0 +1,36 @@
+{
+  "id": "S02",
+  "title": "Concurrent agents — two processes race on shared state",
+  "started_at": "2026-09-06T03:08:55.294Z",
+  "duration_ms": 353,
+  "verdict": "PASS",
+  "expected": "exactly one agent succeeds; the other receives an explainable condition failure; audits agree with server truth",
+  "actual": "1 winner (agent-a), 1 loser with explicit condition failure; server truth = 1 mutation; per-agent audits consistent",
+  "observations": [
+    "sandbox HTTP server on 127.0.0.1:35503 (correct If-Match semantics)",
+    "parent probe of server: status=404",
+    "both agents hold an authorization against the same version",
+    "agent-a exit=0 conditional=satisfied applied=\"v2\"",
+    "agent-b exit=2 conditional=failed applied=null",
+    "server truth: revision=2, last mutation=2026-09-06T03:08:55.550Z",
+    "winner saw: success, applied version \"v2\"",
+    "loser saw: \"provider refused: at \"v2\", authorized \"v1\"\" — an explicit, retry-informative condition failure",
+    "audit of agent-a: action.executed=1, execution.condition_failed=0 (exactly one of the two)",
+    "audit of agent-b: action.executed=0, execution.condition_failed=1 (exactly one of the two)",
+    "8-way race: 1 satisfied, 7 condition_failed; provider log has 1 mutation(s)"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "the losing agent’s stale conditional mutation was refused by the provider (If-Match 412)",
+      "at": "2026-09-06T03:08:55.625Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": []
+  },
+  "notes": "Barrier held both agents at the CAS to make the race deterministic; server-side mutation count is the source of truth."
+}

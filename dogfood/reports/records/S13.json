@@ -1,0 +1,48 @@
+{
+  "id": "S13",
+  "title": "GitHub real-world — conditional file CAS against the live API",
+  "started_at": "2026-09-06T03:28:43.906Z",
+  "duration_ms": 8564,
+  "verdict": "PASS",
+  "expected": "real GitHub enforces blob-sha CAS: matching -> applied, stale -> refused with no side effect, concurrent -> exactly one winner, non-file -> typed refusal, credentials never logged",
+  "actual": "all verified against the live API with server-truth checks; audit accurate; credential hygiene verified",
+  "observations": [
+    "seeded blob sha 56e85dbab4…",
+    "read: blob sha 56e85dbab4… (validation_method=full_fetch)",
+    "GitHub applied the write; new sha d08d971d4e…",
+    "another actor committed a competing change between authorization and the GitHub CAS",
+    "stale mutate refused: GitHub refused: authorized d08d971d4e, reports unknown",
+    "both racing agents hold authorizations against the same blob sha",
+    "agent-a exit=0 conditional=satisfied; agent-b exit=2 conditional=failed",
+    "non-file refusal: ProviderResponseError: provider \"github\" returned malformed state: conditional execution is not available for resource \"pull_request\"; only \"fi",
+    "audit: 1 executed, 1 condition_failed",
+    "credential hygiene: token absent from all audit records"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "GitHub enforced the blob-sha condition on the live API",
+      "at": "2026-09-06T03:28:49.628Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "GitHub serialized the concurrent writers via blob-sha CAS",
+      "at": "2026-09-06T03:28:51.739Z"
+    },
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "GitHub resources other than file do not expose conditional mutation; the provider refuses instead of pretending",
+      "at": "2026-09-06T03:28:51.740Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": [
+      944,
+      1347
+    ]
+  },
+  "notes": null
+}

@@ -1,0 +1,41 @@
+{
+  "id": "S08",
+  "title": "Unknown execution outcome — response lost after the server applied the mutation",
+  "started_at": "2026-09-06T03:09:05.536Z",
+  "duration_ms": 5110,
+  "verdict": "PASS",
+  "expected": "unknown outcomes recorded as failure with explicit side-effect-may-have-occurred qualification; no success claim; no blind retry",
+  "actual": "both loss cases: success=false, action.failed with unknown-outcome note, authorization consumed, retry refused, server truth confirms the effect — divergence made visible",
+  "observations": [
+    "A: result.error: provider \"http\" unavailable: The operation was aborted due to timeout",
+    "A: audit note: \"the conditional operation did not complete; whether the provider evaluated the condition is unknown\"",
+    "A: firewall never claimed success; never claimed not-executed; outcome recorded as failure with explicit unknown-side-effect note",
+    "A: server truth confirms the mutation APPLIED (revision 2) while the firewall recorded a failure — divergence surfaced honestly",
+    "A: blind retry refused (ReplayDetectedError) — reconciliation must go through a fresh read",
+    "A: fresh read shows the authoritative version is now \"v2\"; an agent reconciles against THIS, not against its old belief",
+    "B: audit note: \"the conditional operation did not complete; whether the provider evaluated the condition is unknown\"",
+    "B: firewall recorded failure (never success); server truth shows the effect happened — operator must reconcile"
+  ],
+  "block_classifications": [
+    {
+      "classification": "UNKNOWN",
+      "detail": "unknown external outcome is faithfully represented as failure-with-unknown, not as success",
+      "at": "2026-09-06T03:09:10.628Z"
+    },
+    {
+      "classification": "UNKNOWN",
+      "detail": "error-after-apply is indistinguishable from error-before-apply over HTTP: honest UNKNOWN is the only truthful representation",
+      "at": "2026-09-06T03:09:10.645Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": [
+      5002,
+      2
+    ]
+  },
+  "notes": "This is the §12 critical scenario. The firewall cannot know what it cannot observe; it never overstates."
+}

@@ -1,0 +1,50 @@
+{
+  "id": "S01",
+  "title": "Stale file edit — provider rejects stale conditional mutation",
+  "started_at": "2026-09-06T03:08:55.189Z",
+  "duration_ms": 13,
+  "verdict": "PASS",
+  "expected": "provider rejects stale conditional mutation; no overwrite; auth unusable; audit truthful; fresh eval required",
+  "actual": "all assertions held: condition_failed, no overwrite, replay refused, audit recorded condition_failed (never executed), fresh retry succeeded, chain verified",
+  "observations": [
+    "agent observes file at version v1",
+    "another actor mutated the file (now v2) while the agent was executing",
+    "execution result: conditional_execution=failed, observed_version=v2",
+    "result error: \"provider refused: resource git:file/configs/deploy.yaml at version v2, authorized v1\"",
+    "no stale overwrite: file content still carries the human edit only",
+    "audit: condition_failed recorded (expected [{\"ref\":\"git:file/configs/deploy.yaml\",\"version\":\"v1\"}], observed \"v2\")",
+    "fresh evaluation produced a new authorization and the edit applied",
+    "decision when world moved first: DENY — policy \"edit-config-file\": required dependency is INVALID — git:file/configs/deploy.yaml is INVALID (state changed after observation: observ",
+    "the agent’s unrecognized claimed version made the dependency INVALID -> DENY; belief was never executed on"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "provider refused a mutation conditioned on a version that had changed",
+      "at": "2026-09-06T03:08:55.198Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [
+    {
+      "context": "replay of consumed authorization after condition failure",
+      "name": "ReplayDetectedError",
+      "message": "replay detected for action act_s01_race; authorization cannot be reused",
+      "code": "SSF_REPLAY_DETECTED",
+      "details": {
+        "authorized_at": "2026-09-06T03:08:55.196Z",
+        "consumed_at": "2026-09-06T03:08:55.197Z"
+      },
+      "decision_reason": null
+    }
+  ],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": [
+      0,
+      0,
+      0
+    ]
+  },
+  "notes": "Race window was injected between authorization and provider CAS (the real-world window the firewall targets)."
+}

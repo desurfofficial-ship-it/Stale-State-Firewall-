@@ -1,0 +1,51 @@
+{
+  "id": "S06",
+  "title": "Policy change — authorizations cannot outlive the policy that granted them",
+  "started_at": "2026-09-06T03:08:56.013Z",
+  "duration_ms": 14,
+  "verdict": "PASS",
+  "expected": "old authorizations cannot execute after a policy change; new decisions follow the new policy",
+  "actual": "authorizations are single-use inside one execute() call; actionId reuse refused as replay; fresh attempts follow the current policy immediately; policy change cannot be circumvented",
+  "observations": [
+    "(1) executed: decision=ALLOW, risk=MEDIUM",
+    "(2) reuse refused: ReplayDetectedError: replay detected for action act_s06_v1; authorization cannot be reused",
+    "(2b) cross-deployment reuse (fresh store, same actionId): executed=true, decision=ALLOW — action ids are store-scoped; the replay guarantee is per deployment",
+    "(3) fresh attempt decision: ALLOW under risk=CRITICAL; new policy applied immediately",
+    "(4-variant) same intent under a refusing policy: DENY — policy \"deploy\": required dependency is INVALID — a precondition failed against current state. Action risk MEDIUM. Decis",
+    "(5) decision under CRITICAL: ALLOW"
+  ],
+  "block_classifications": [
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "action-id uniqueness is per deployment (store-scoped); agents hitting two independent SSF deployments with the same id are outside the single-deployment replay guarantee (documented scope)",
+      "at": "2026-09-06T03:08:56.023Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "the changed policy governs the fresh decision; nothing inherited",
+      "at": "2026-09-06T03:08:56.026Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [
+    {
+      "context": "action id reuse after policy change",
+      "name": "ReplayDetectedError",
+      "message": "replay detected for action act_s06_v1; authorization cannot be reused",
+      "code": "SSF_REPLAY_DETECTED",
+      "details": {
+        "authorized_at": "2026-09-06T03:08:56.020Z",
+        "consumed_at": "2026-09-06T03:08:56.021Z"
+      },
+      "decision_reason": null
+    }
+  ],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": [
+      0,
+      0
+    ]
+  },
+  "notes": "Binding model (documented as measured): policy binds at decision time per attempt. There is no durable cross-call authorization; escalation approval additionally binds to approved semantics and re-verifies freshness (covered by S10/S11)."
+}

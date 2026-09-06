@@ -128,14 +128,17 @@ export interface ExpectedStateEntry {
  * - 'failed': the external system REJECTED the operation because its
  *   authoritative state no longer matches the authorized expected state.
  *   No side effect occurred. This is NOT an internal error and MUST NOT be
- *   retried under the same authorization.
+ *   retried under the same authorization. `ref` names the dependency whose
+ *   authorized expected state did not hold, when the executor can identify
+ *   it (dogfood finding DF-4: a multi-dependency condition failure must be
+ *   attributable to a specific ref from the audit trail alone).
  * - 'unavailable': the executor could not enforce the expected state for
  *   every resource its effect touches, so it refused to act. No side effect
  *   occurred.
  */
 export type ConditionalExecutionResult =
   | { condition: 'satisfied'; success: boolean; output?: unknown; error?: string }
-  | { condition: 'failed'; observed_version: string | null; error?: string }
+  | { condition: 'failed'; ref?: string | null; observed_version: string | null; error?: string }
   | { condition: 'unavailable'; error?: string };
 
 /**

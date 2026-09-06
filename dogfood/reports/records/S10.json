@@ -1,0 +1,40 @@
+{
+  "id": "S10",
+  "title": "Argument tampering — authorization binding under swapped arguments",
+  "started_at": "2026-09-06T03:09:27.648Z",
+  "duration_ms": 12,
+  "verdict": "PASS",
+  "expected": "authorization binds arguments; version swaps refused; approval cannot be reused with tampered arguments",
+  "actual": "normal path structurally bound; cross-ref swap refused by CAS; tampered approval resubmission REFUSED after the DF-3 fix (found by this scenario earlier in the same dogfood run: binding compared only tool/operation/target/dependencies)",
+  "observations": [
+    "(1) the same normalized intent drives both decision and executor — no swap window exists in the public path",
+    "(2) the CAS is ref-scoped: a foreign version cannot satisfy the condition",
+    "(3) escalation requested for an unverifiable purge; a human approves it",
+    "(3) tampered resubmission REFUSED by approval binding: submitted action does not match the approved escalation for act_s10_esc: approval binds to operation \"purge_table\", target \"none\", dependencies [db:table/no-suc",
+    "(3-control) untampered resubmission: executed=false, decision=DENY (fail-closed re-verification; the binding let it through)"
+  ],
+  "block_classifications": [
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "single normalized intent = structural argument binding",
+      "at": "2026-09-06T03:09:27.656Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "ref-scoped CAS blocks cross-dependency version substitution",
+      "at": "2026-09-06T03:09:27.658Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "approval binding covers arguments (DF-3 fixed)",
+      "at": "2026-09-06T03:09:27.659Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": []
+  },
+  "notes": "DF-3 was discovered and fixed during dogfood; a regression test pins it in test/dogfood/regressions.test.ts."
+}

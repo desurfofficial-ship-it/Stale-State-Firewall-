@@ -40,6 +40,7 @@ import { resolveDependencyFreshness } from '../engine/policy-resolver.js';
 import { defaultDeadlineForRisk, type ResolvedPolicy } from '../engine/resolved-policy.js';
 import { newId, ID_PREFIXES } from '../domain/identifiers.js';
 import { refKey } from '../domain/state.js';
+import { canonicalJson } from '../engine/hashing.js';
 import { redactDeep } from '../redaction/redact.js';
 
 export interface ExecutionOutcome {
@@ -548,6 +549,18 @@ export async function executeApprovedAction(
     );
   }
   const submitted = normalizeIntent(intentInput, ctx.clock.nowMs());
+
+  // ---- Argument binding (dogfood finding DF-3) -----------------------------
+  // A human approved a specific ACTION, arguments included. Resubmitting the
+  // approved action id with different arguments must not inherit the
+  // approval: compare the canonicalized REDACTED arguments of the persisted
+  // action against the submitted ones. Redaction keeps the comparison honest
+  // without persisting secrets in the error path.
+  const originalAction = await ctx.store.getAction(actionId);
+  const sameArguments =
+    canonicalJson(redactDeep(originalAction?.arguments ?? {})) ===
+    canonicalJson(redactDeep(submitted.arguments ?? {}));
+
   const originalDeps = originalDecision.verdicts.map((v) => refKey(v.dependency)).sort();
   const submittedDeps = submitted.dependencies.map((d) => refKey(d)).sort();
   const sameSemantics =
@@ -555,7 +568,8 @@ export async function executeApprovedAction(
     originalDecision.operation === submitted.operation &&
     (originalDecision.target ?? null) === (submitted.target ?? null) &&
     originalDeps.length === submittedDeps.length &&
-    originalDeps.every((key, index) => key === submittedDeps[index]);
+    originalDeps.every((key, index) => key === submittedDeps[index]) &&
+    sameArguments;
   if (!sameSemantics) {
     ctx.audit.append('action.blocked', {
       action_id: actionId,
@@ -563,12 +577,13 @@ export async function executeApprovedAction(
       execution_status: 'blocked',
       reason:
         'escalation approval does not match the submitted action semantics; ' +
-        'an approval binds to the originally approved operation, target, and dependencies',
+        'an approval binds to the originally approved operation, target, dependencies, and arguments',
     });
     throw new UnauthorizedActionError(
       `submitted action does not match the approved escalation for ${actionId}: ` +
         `approval binds to operation "${originalDecision.operation}", target "${originalDecision.target ?? 'none'}", ` +
-        `dependencies [${originalDeps.join(', ')}]`,
+        `dependencies [${originalDeps.join(', ')}]` +
+        (sameArguments ? '' : ', and the originally approved arguments'),
     );
   }
 
@@ -729,6 +744,12 @@ async function executeConditionally(
       conditional_execution: 'failed',
       expected_state: expectedStateForAudit,
       observed_version: conditional.observed_version,
+      // DF-4 (dogfood): name the dependency whose expected state did not
+      // hold and carry the executor's own refusal message, so a human reading
+      // the audit can attribute a multi-dependency condition failure to a
+      // specific ref without reading source code.
+      failed_ref: conditional.ref ?? null,
+      provider_error: conditional.error,
       provider: executorProviderName(ctx, intent) ?? undefined,
       provider_capability: providerCapability,
       decision_ref: decision.decision_id,

@@ -1,0 +1,42 @@
+{
+  "id": "S05",
+  "title": "Multi-dependency action — single dependency mutation isolated",
+  "started_at": "2026-09-06T03:08:55.930Z",
+  "duration_ms": 13,
+  "verdict": "FINDING",
+  "expected": "(1) no execution + identifiable cause; (2)/(3) measured honestly against the documented guarantee",
+  "actual": "(1) refused by CAS, cause identifiable from audit; (2) EXECUTED — read-only dep drift is outside the write-CAS scope (finding P2, docs gap); (3) re-based at validation",
+  "observations": [
+    "no execution; B and C untouched",
+    "audit expected_state: [{\"ref\":\"git:file/configs/deploy.yaml\",\"version\":\"v1\"},{\"ref\":\"git:lockfile/package-lock\",\"version\":\"v2\"},{\"ref\":\"git:ci_pipeline/main\",\"version\":\"v3\"}]",
+    "audit observed_version: \"v4\" (current file version: v4)",
+    "UNDERSTANDABILITY: the audit identifies the drifted ref (failed_ref + provider_error; verifiable by comparing expected_state[].version against observed_version)",
+    "lockfile mutated by \"another actor\" between authorization and CAS",
+    "(2) outcome: executed=true, conditional=satisfied",
+    "(2) the applied content was: \"replicas: 4\\n# derived from lockfile=4.17.20, ci=passing\\n\"",
+    "(3) decision: ALLOW — fresh observations validated cleanly (stale-claim refusal is covered by S04 case 2)"
+  ],
+  "block_classifications": [
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "write-CAS is ref-scoped; read-only deps have no provider-enforced condition",
+      "at": "2026-09-06T03:08:55.942Z"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P2",
+      "text": "GUARANTEE SCOPE: provider-enforced conditional execution covers only the resources the effect WRITES. A read-only dependency that drifts between authorization and execution is NOT re-verified in the conditional path (the legacy fingerprint re-check covered it best-effort). Action parameters derived from read-only deps can be executed from stale values. Docs say \"conditioned resources\" but never state this scope explicitly. Fix: document the scope explicitly in limitations/threat-model/atomic-effect-assurance (no code change: per-resource CAS is the providers' contract)."
+    }
+  ],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": [
+      0,
+      1,
+      1
+    ]
+  },
+  "notes": "Finding is a documentation/guarantee-scope issue, not an implementation bug: the executor contract enforces written refs; read-only drift enforcement has no provider primitive."
+}

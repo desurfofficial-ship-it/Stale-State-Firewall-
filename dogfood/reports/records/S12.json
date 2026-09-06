@@ -1,0 +1,57 @@
+{
+  "id": "S12",
+  "title": "Dependency staleness — five-dependency workflow, single drift isolation",
+  "started_at": "2026-09-06T03:09:27.814Z",
+  "duration_ms": 16,
+  "verdict": "FINDING",
+  "expected": "single-dependency drift is detected in every window",
+  "actual": "written-dependency drift refused by CAS with per-ref expected/observed versions in the audit; 4/4 read-only drifts executed in the CAS window (DF-F2 guarantee-scope, documented); pre-execute drift refused at validation",
+  "observations": [
+    "repo_head: executed=true — NOT blocked (write-CAS is ref-scoped; see DF-F2)",
+    "lockfile: executed=true — NOT blocked (write-CAS is ref-scoped; see DF-F2)",
+    "deployment_policy: executed=true — NOT blocked (write-CAS is ref-scoped; see DF-F2)",
+    "ci_pipeline: executed=true — NOT blocked (write-CAS is ref-scoped; see DF-F2)",
+    "(6) decision: ALLOW — the agent re-observed current state, so fresh claims validate cleanly (refusal of stale claims demonstrated in S04 case 2)"
+  ],
+  "block_classifications": [
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "repo_head drift in the CAS window is outside the write-CAS scope (DF-F2)",
+      "at": "2026-09-06T03:09:27.826Z"
+    },
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "lockfile drift in the CAS window is outside the write-CAS scope (DF-F2)",
+      "at": "2026-09-06T03:09:27.827Z"
+    },
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "deployment_policy drift in the CAS window is outside the write-CAS scope (DF-F2)",
+      "at": "2026-09-06T03:09:27.827Z"
+    },
+    {
+      "classification": "PROVIDER_LIMITATION",
+      "detail": "ci_pipeline drift in the CAS window is outside the write-CAS scope (DF-F2)",
+      "at": "2026-09-06T03:09:27.828Z"
+    },
+    {
+      "classification": "CORRECT_BLOCK",
+      "detail": "validation window re-reads every declared dependency",
+      "at": "2026-09-06T03:09:27.829Z"
+    }
+  ],
+  "findings": [],
+  "error_samples": [],
+  "latency": {
+    "validation_ms": [],
+    "execution_ms": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "notes": "Reinforces DF-F2 from S05 with a realistic five-dependency workflow. Operators relying on read-only drift detection must keep require_fresh_at_execution legacy verification or accept the documented scope."
+}
