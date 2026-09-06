@@ -111,8 +111,17 @@ export class InMemoryStateProvider implements StateProvider {
   }
 
   /**
-   * Registers or replaces a resource. When `version` is omitted a monotonic
-   * v-counter is used; fixtures and tests may pin explicit versions.
+   * Registers or replaces a resource. Version semantics are deliberate and
+   * differ by case (FL-9):
+   * - NEW resource, `version` omitted: a monotonic v-counter is assigned.
+   * - EXISTING resource, `version` omitted: the CURRENT version is KEPT —
+   *   a content replace that is invisible to CAS comparisons held at the
+   *   old version. This is a re-seeding convenience for fixtures; it is NOT
+   *   an external-actor mutation and must never be used to simulate one.
+   * - An explicit `version` argument always wins (tests pin exact versions).
+   * To simulate a concurrent external actor, use `mutate()`: it always
+   * advances the version, so stale CAS comparisons honestly report
+   * condition_failed.
    * `serverTimeIso` marks the resource as carrying a provider-server stamp
    * (provenance time_source "server") for the given observation timestamp.
    */
