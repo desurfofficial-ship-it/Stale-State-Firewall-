@@ -128,8 +128,8 @@ decision reason names the drifted ref). The agent then recovers **without
 developer intervention** (§15): re-observes, recomputes *preserving the human
 hotfix*, creates a NEW authorization, executes — server truth shows the
 intended change with the hotfix intact. §14 anti-cheating rules honored: no
-internal helpers, no bypassed authorization, live provider semantics (not
-mocked) for all provider-guarantee steps, no suppressed failures.
+internal helpers, no bypassed authorization, live provider semantics rather
+than simulated ones for all provider-guarantee steps, no suppressed failures.
 
 ## Condition Failure Recovery (§17)
 
