@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-09-06T08:27:50.846Z",
-  "finished_at": "2026-09-06T08:27:51.354Z",
+  "started_at": "2026-09-06T09:33:43.656Z",
+  "finished_at": "2026-09-06T09:33:44.228Z",
   "with_github": false,
   "scenario_counts": {
     "PASS": 12
@@ -47,7 +47,7 @@
       "id": "concurrent-deploy-flip",
       "title": "Two agents flipping one deployment on a shared store: exactly one executes",
       "verdict": "PASS",
-      "duration_ms": 7,
+      "duration_ms": 8,
       "steps": [
         {
           "name": "exactly one agent executed the flip; the other was refused",
@@ -93,7 +93,7 @@
       "id": "multi-dependency-staleness",
       "title": "3-dependency release: written-dep drift refused with per-ref attribution",
       "verdict": "PASS",
-      "duration_ms": 3,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "drifted written dependency refused by provider CAS (no stale image bump)",
@@ -150,7 +150,7 @@
       "id": "unknown-outcome",
       "title": "Lost response after send: explicit UNKNOWN outcome, unsafe retry, replay refused",
       "verdict": "PASS",
-      "duration_ms": 1,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "recorded as explicit UNKNOWN (never success, never \"not executed\")",
@@ -181,7 +181,7 @@
       "id": "http-conditional-mutation",
       "title": "HTTP If-Match CAS end to end: matching state applies, stale state gets 412 with no mutation",
       "verdict": "PASS",
-      "duration_ms": 95,
+      "duration_ms": 107,
       "steps": [
         {
           "name": "correct server, If-Match matches: mutation applied under provider-enforced CAS",
@@ -232,7 +232,7 @@
       "id": "dependency-completeness-boundary",
       "title": "DF-F2 boundary: written dep is CAS-protected; read-only dep drift in the CAS window is not",
       "verdict": "PASS",
-      "duration_ms": 1,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "read-only dependency drift BEFORE authorization -> DENY at validation (declared deps are re-read)",
@@ -251,7 +251,7 @@
       "id": "policy-change",
       "title": "Policy change: consumed authorizations dead, live authorizations bounded by deadline, fresh actions follow new policy",
       "verdict": "PASS",
-      "duration_ms": 1,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "a consumed authorization stays dead after a policy change (single-use, audited)",
@@ -269,7 +269,7 @@
       "id": "escalation-argument-binding",
       "title": "Human approval binds to the approved arguments; swapped arguments are refused (DF-3)",
       "verdict": "PASS",
-      "duration_ms": 2,
+      "duration_ms": 1,
       "steps": [
         {
           "name": "destructive action on unverifiable state is held for human approval",
@@ -291,7 +291,7 @@
       "id": "crash-restart-persistence",
       "title": "Crash/restart: interruption at claim, after provider response, and after completion — SQLite persistence keeps the guarantees",
       "verdict": "PASS",
-      "duration_ms": 259,
+      "duration_ms": 307,
       "steps": [
         {
           "name": "crash after authorization, before execution: NO side effect; replay refused across restart; audit records no execution",
