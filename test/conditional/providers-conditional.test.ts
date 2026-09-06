@@ -279,4 +279,30 @@ describe('http provider: conditional execution via If-Match preconditions', () =
       }),
     ).rejects.toBeInstanceOf(ProviderResponseError);
   });
+
+  it('HC6 a deadline miss (server never answers) is a provider-unavailable failure, never a condition failure or silent success', async () => {
+    const hanging = createServer(() => {
+      /* intentionally never responds */
+    });
+    await new Promise<void>((resolve) => hanging.listen(0, '127.0.0.1', resolve));
+    const hangingUrl = `http://127.0.0.1:${(hanging.address() as AddressInfo).port}`;
+    try {
+      const provider = new HttpStateProvider({
+        items: {
+          url: `${hangingUrl}/items/{id}`,
+          version: { source: 'header', name: 'etag' },
+          mutation: { method: 'PUT', condition_failed_status: [412, 409] },
+        },
+      });
+      await expect(
+        provider.conditionalExecute({
+          ref: { source: 'http', resource: 'items', resource_id: '1' },
+          expected_version: 'v1',
+          changes: { status: 'x' },
+        }),
+      ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    } finally {
+      await new Promise<void>((resolve) => hanging.close(() => resolve()));
+    }
+  });
 });
