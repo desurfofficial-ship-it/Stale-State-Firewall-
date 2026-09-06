@@ -15,8 +15,17 @@ const RUN = Date.now().toString(36);
 const BASE = `dogfood/harness-${RUN}`;
 const TOKEN = process.env.SSF_GITHUB_TOKEN ?? '';
 
+let cacheBustSeq = 0;
 function ghApi(method, pathName, body) {
-  return fetch(`https://api.github.com${pathName}`, {
+  const url = new URL(`https://api.github.com${pathName}`);
+  if (method === 'GET') {
+    // Cache buster: GitHub's Contents API serves short-TTL URL-keyed copies;
+    // a bare GET after a write can read stale content on some network paths
+    // (observed on Actions runners — friction log FL-7). Unique query forces
+    // a cache miss so seeding/cleanup reads are always fresh.
+    url.searchParams.set('cb', `${Date.now().toString(36)}${++cacheBustSeq}`);
+  }
+  return fetch(url, {
     method,
     headers: {
       authorization: `Bearer ${TOKEN}`,

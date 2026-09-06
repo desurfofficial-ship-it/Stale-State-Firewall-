@@ -34,8 +34,18 @@ const DEP = `dogfood/adoption-${RUN}/app-settings.yaml`;
 const TOKEN = process.env.SSF_GITHUB_TOKEN ?? '';
 const TARGET_REF = `github:file/${GH_REPO}@${TARGET}`;
 
+let cacheBustSeq = 0;
 function ghApi(method, pathName, body) {
-  return fetch(`https://api.github.com${pathName}`, {
+  const url = new URL(`https://api.github.com${pathName}`);
+  if (method === 'GET') {
+    // GitHub's Contents API answers from short-TTL caches keyed by URL: a
+    // successful write followed immediately by a bare GET can read a stale
+    // copy (observed for real on Actions runners — CI run 34020575403,
+    // friction log FL-7; local runs never hit it). A unique query parameter
+    // forces a cache miss so every harness read is served fresh.
+    url.searchParams.set('cb', `${Date.now().toString(36)}${++cacheBustSeq}`);
+  }
+  return fetch(url, {
     method,
     headers: {
       authorization: `Bearer ${TOKEN}`,
@@ -45,6 +55,24 @@ function ghApi(method, pathName, body) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+}
+
+/**
+ * Server-truth readback with a bounded eventual-consistency window.
+ * Used ONLY after the provider has already confirmed the outcome of a
+ * mutation (satisfied or refused) — never to retry a mutation and never to
+ * decide one. If the first fresh read does not yet match the confirmed
+ * truth, it re-reads briefly; a persistent mismatch still fails the step.
+ */
+async function readBackUntil(accept, { attempts = 6, delayMs = 900 } = {}) {
+  let file = await ghGetFile(TARGET);
+  let reads = 1;
+  while (!accept(file) && reads < attempts) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    file = await ghGetFile(TARGET);
+    reads += 1;
+  }
+  return { file, reads, ok: accept(file) };
 }
 
 async function ghPutFile(pathName, content, message, sha) {
@@ -142,12 +170,13 @@ export default {
       });
 
       const outcome = await agent.execute(intentOf(observedSha), executor, { actionId: nextActionId() });
-      const after = await ghGetFile(TARGET);
+      const satisfiedA = outcome.executed && outcome.result?.conditional_execution === 'satisfied';
+      const readA = await readBackUntil((f) => f.content?.includes('replicas: 3'));
       steps.push({
         name: 'A: authorize + provider-CAS execute: the change lands exactly as authorized (during/after)',
-        verdict: outcome.executed && outcome.result?.conditional_execution === 'satisfied' && after.content?.includes('replicas: 3')
+        verdict: satisfiedA && readA.ok
           ? 'EXPECTED_SUCCESS' : 'UNEXPECTED_FAILURE',
-        detail: `conditional=${outcome.result?.conditional_execution} server_truth_replicas=${/replicas: (\d+)/.exec(after.content ?? '')?.[1]}`,
+        detail: `conditional=${outcome.result?.conditional_execution} server_truth_replicas=${/replicas: (\d+)/.exec(readA.file.content ?? '')?.[1]} reads=${readA.reads}`,
       });
 
       // ---- Metrics (§20) ---------------------------------------------------
@@ -179,13 +208,14 @@ export default {
         makeExecutor(provider, () => contentOf(3, '# hotfix by human: bumped replicas under load\n')),
         { actionId: nextActionId() },
       );
-      const afterRecovery = await ghGetFile(TARGET);
+      const afterRecovery = await readBackUntil(
+        (f) => f.content?.includes('replicas: 3') && f.content?.includes('hotfix by human'),
+      );
       steps.push({
         name: 'D: recovery WITHOUT developer help: re-observe → recompute (hotfix preserved) → NEW authorization → execute',
-        verdict: recovered.executed && recovered.result?.conditional_execution === 'satisfied'
-          && afterRecovery.content?.includes('replicas: 3') && afterRecovery.content?.includes('hotfix by human')
+        verdict: recovered.executed && recovered.result?.conditional_execution === 'satisfied' && afterRecovery.ok
           ? 'EXPECTED_SUCCESS' : 'UNEXPECTED_FAILURE',
-        detail: `conditional=${recovered.result?.conditional_execution} hotfix_preserved=${afterRecovery.content?.includes('hotfix by human')}`,
+        detail: `conditional=${recovered.result?.conditional_execution} hotfix_preserved=${afterRecovery.file.content?.includes('hotfix by human')} reads=${afterRecovery.reads}`,
       });
 
       // ---- E. CAS-window refusal + recovery contract (§17) ------------------
@@ -198,7 +228,10 @@ export default {
         return realCas(i, es);
       };
       const windowed = await agent.execute(intentOf(currentSha), racing, { actionId: nextActionId() });
-      const truthAfterRefusal = (await ghGetFile(TARGET)).content ?? '';
+      const readE = await readBackUntil(
+        (f) => (f.content ?? '').includes('# concurrent actor') && (f.content ?? '').includes('replicas: 9'),
+      );
+      const truthAfterRefusal = readE.file.content ?? '';
       // The concurrent actor's marker must still be there (last write won); the
       // refused stale write (replicas: 3, no marker) must NOT have replaced it.
       const noStaleLanding = truthAfterRefusal.includes('# concurrent actor') && truthAfterRefusal.includes('replicas: 9');
@@ -208,7 +241,7 @@ export default {
           && windowed.result?.recovery?.retry_safety === 'SAFE_ONLY_AFTER_FRESH_EVALUATION'
           && windowed.result?.recovery?.side_effect_possible === false
           ? 'EXPECTED_SECURITY_BLOCK' : 'SECURITY_FAILURE',
-        detail: `conditional=${windowed.result?.conditional_execution} retry_safety=${windowed.result?.recovery?.retry_safety} no_stale_landing=${noStaleLanding}`,
+        detail: `conditional=${windowed.result?.conditional_execution} retry_safety=${windowed.result?.recovery?.retry_safety} no_stale_landing=${noStaleLanding} reads=${readE.reads}`,
       });
 
       // recovery from the condition failure: fresh observation → new action
@@ -278,7 +311,10 @@ export default {
       ]);
       const satisfied = [resA, resB].filter((r) => r.executed && r.result?.conditional_execution === 'satisfied');
       const refused = [resA, resB].filter((r) => r.executed === false && r.result?.conditional_execution === 'failed');
-      const serverTruth = await ghGetFile(TARGET);
+      const readG = await readBackUntil(
+        (f) => (f.content ?? '').includes('# agent A') || (f.content ?? '').includes('# agent B'),
+      );
+      const serverTruth = readG.file;
       const truth = serverTruth.content ?? '';
       const winnerMarker = truth.includes('# agent A') ? 'A' : truth.includes('# agent B') ? 'B' : null;
       const exactlyOne = satisfied.length === 1 && refused.length === 1
@@ -287,7 +323,7 @@ export default {
       steps.push({
         name: 'G: two independent agents race conflicting mutations → exactly one lands; GitHub (not local coordination) decides the winner',
         verdict: exactlyOne ? 'EXPECTED_SECURITY_BLOCK' : 'SECURITY_FAILURE',
-        detail: `satisfied=${satisfied.length} refused=${refused.length} winner=agent-${winnerMarker} loser_observed=${(refused[0]?.result?.observed_version ?? 'n/a').slice(0, 12)}…`,
+        detail: `satisfied=${satisfied.length} refused=${refused.length} winner=agent-${winnerMarker} loser_observed=${(refused[0]?.result?.observed_version ?? 'n/a').slice(0, 12)}… reads=${readG.reads}`,
       });
       // recovery for the racing loser: fresh observation → new authorization
       const postRaceSha = (await ghGetFile(TARGET)).sha;
