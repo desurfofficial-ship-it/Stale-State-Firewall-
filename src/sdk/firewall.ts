@@ -82,10 +82,14 @@ export class StaleStateFirewall {
   private readonly options: FirewallOptions;
   private readonly protectedToolNames = new Set<string>();
   private readonly clock: Clock;
+  private _storeDescription: string = '(store not initialized)';
+
   /** Human-readable identity of the authorization/state store in use
    *  (trust-domain visibility: lets operators notice two deployments that
    *  accidentally point at the same store). Set during init(). */
-  readonly storeDescription: string = '(store not initialized)';
+  get storeDescription(): string {
+    return this._storeDescription;
+  }
 
   constructor(options: FirewallOptions = {}) {
     if (!options.config && !options.configPath) {
@@ -128,7 +132,7 @@ export class StaleStateFirewall {
       ? { store: this.options.store, description: 'injected store instance' }
       : await buildStore(file);
     const store = built.store;
-    this.storeDescription = built.description;
+    this._storeDescription = built.description;
     await store.init();
 
     const providers = await buildProviders(file, this.options.providers ?? []);

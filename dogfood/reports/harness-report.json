@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-09-06T07:23:48.614Z",
-  "finished_at": "2026-09-06T07:23:48.838Z",
+  "started_at": "2026-09-06T07:26:55.183Z",
+  "finished_at": "2026-09-06T07:26:55.407Z",
   "with_github": false,
   "scenario_counts": {
     "PASS": 11
@@ -47,7 +47,7 @@
       "id": "concurrent-deploy-flip",
       "title": "Two agents flipping one deployment on a shared store: exactly one executes",
       "verdict": "PASS",
-      "duration_ms": 7,
+      "duration_ms": 6,
       "steps": [
         {
           "name": "exactly one agent executed the flip; the other was refused",
@@ -71,7 +71,7 @@
       "id": "replay-and-tamper",
       "title": "Replay is refused; an authorization for one target cannot mutate another",
       "verdict": "PASS",
-      "duration_ms": 1,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "legitimate CI workflow edit executes once",
@@ -116,7 +116,7 @@
       "id": "provider-fail-closed",
       "title": "Provider outage during validation fails closed (no unsafe success, no fuzzy ALLOW)",
       "verdict": "PASS",
-      "duration_ms": 3,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "CRITICAL action during provider outage: executor never ran (no unsafe success, no fuzzy ALLOW)",
@@ -181,7 +181,7 @@
       "id": "http-conditional-mutation",
       "title": "HTTP If-Match CAS end to end: matching state applies, stale state gets 412 with no mutation",
       "verdict": "PASS",
-      "duration_ms": 83,
+      "duration_ms": 85,
       "steps": [
         {
           "name": "correct server, If-Match matches: mutation applied under provider-enforced CAS",
@@ -213,7 +213,7 @@
       "id": "http-broken-server-boundary",
       "title": "Documented boundary: an If-Match-ignoring server voids the CAS — the firewall records what it can see",
       "verdict": "PASS",
-      "duration_ms": 10,
+      "duration_ms": 9,
       "steps": [
         {
           "name": "broken server applied the stale write; firewall records its own vantage honestly (documented trust boundary — operator MUST verify If-Match per endpoint)",
@@ -251,7 +251,7 @@
       "id": "policy-change",
       "title": "Policy change: consumed authorizations dead, live authorizations bounded by deadline, fresh actions follow new policy",
       "verdict": "PASS",
-      "duration_ms": 2,
+      "duration_ms": 1,
       "steps": [
         {
           "name": "a consumed authorization stays dead after a policy change (single-use, audited)",

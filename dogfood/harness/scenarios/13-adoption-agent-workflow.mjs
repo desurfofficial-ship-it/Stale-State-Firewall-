@@ -33,7 +33,6 @@ const TARGET = `dogfood/adoption-${RUN}/deploy.yaml`;
 const DEP = `dogfood/adoption-${RUN}/app-settings.yaml`;
 const TOKEN = process.env.SSF_GITHUB_TOKEN ?? '';
 const TARGET_REF = `github:file/${GH_REPO}@${TARGET}`;
-const DEP_REF = `github:file/${GH_REPO}@${DEP}`;
 
 function ghApi(method, pathName, body) {
   return fetch(`https://api.github.com${pathName}`, {
