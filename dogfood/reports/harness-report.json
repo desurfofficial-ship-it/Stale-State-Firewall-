@@ -1,13 +1,13 @@
 {
-  "started_at": "2026-09-06T07:31:28.021Z",
-  "finished_at": "2026-09-06T07:31:28.262Z",
+  "started_at": "2026-09-06T08:27:50.846Z",
+  "finished_at": "2026-09-06T08:27:51.354Z",
   "with_github": false,
   "scenario_counts": {
-    "PASS": 11
+    "PASS": 12
   },
   "step_counts": {
-    "EXPECTED_SECURITY_BLOCK": 17,
-    "EXPECTED_SUCCESS": 19,
+    "EXPECTED_SECURITY_BLOCK": 18,
+    "EXPECTED_SUCCESS": 21,
     "DOCUMENTED_BOUNDARY": 2
   },
   "results": [
@@ -71,7 +71,7 @@
       "id": "replay-and-tamper",
       "title": "Replay is refused; an authorization for one target cannot mutate another",
       "verdict": "PASS",
-      "duration_ms": 3,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "legitimate CI workflow edit executes once",
@@ -93,7 +93,7 @@
       "id": "multi-dependency-staleness",
       "title": "3-dependency release: written-dep drift refused with per-ref attribution",
       "verdict": "PASS",
-      "duration_ms": 2,
+      "duration_ms": 3,
       "steps": [
         {
           "name": "drifted written dependency refused by provider CAS (no stale image bump)",
@@ -116,7 +116,7 @@
       "id": "provider-fail-closed",
       "title": "Provider outage during validation fails closed (no unsafe success, no fuzzy ALLOW)",
       "verdict": "PASS",
-      "duration_ms": 2,
+      "duration_ms": 3,
       "steps": [
         {
           "name": "CRITICAL action during provider outage: executor never ran (no unsafe success, no fuzzy ALLOW)",
@@ -150,7 +150,7 @@
       "id": "unknown-outcome",
       "title": "Lost response after send: explicit UNKNOWN outcome, unsafe retry, replay refused",
       "verdict": "PASS",
-      "duration_ms": 2,
+      "duration_ms": 1,
       "steps": [
         {
           "name": "recorded as explicit UNKNOWN (never success, never \"not executed\")",
@@ -181,7 +181,7 @@
       "id": "http-conditional-mutation",
       "title": "HTTP If-Match CAS end to end: matching state applies, stale state gets 412 with no mutation",
       "verdict": "PASS",
-      "duration_ms": 84,
+      "duration_ms": 95,
       "steps": [
         {
           "name": "correct server, If-Match matches: mutation applied under provider-enforced CAS",
@@ -213,7 +213,7 @@
       "id": "http-broken-server-boundary",
       "title": "Documented boundary: an If-Match-ignoring server voids the CAS — the firewall records what it can see",
       "verdict": "PASS",
-      "duration_ms": 11,
+      "duration_ms": 10,
       "steps": [
         {
           "name": "broken server applied the stale write; firewall records its own vantage honestly (documented trust boundary — operator MUST verify If-Match per endpoint)",
@@ -251,7 +251,7 @@
       "id": "policy-change",
       "title": "Policy change: consumed authorizations dead, live authorizations bounded by deadline, fresh actions follow new policy",
       "verdict": "PASS",
-      "duration_ms": 2,
+      "duration_ms": 1,
       "steps": [
         {
           "name": "a consumed authorization stays dead after a policy change (single-use, audited)",
@@ -283,6 +283,30 @@
           "name": "identical resubmission passes the binding but STILL fails closed on unverifiable state",
           "verdict": "EXPECTED_SECURITY_BLOCK",
           "detail": "decision=DENY"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "crash-restart-persistence",
+      "title": "Crash/restart: interruption at claim, after provider response, and after completion — SQLite persistence keeps the guarantees",
+      "verdict": "PASS",
+      "duration_ms": 259,
+      "steps": [
+        {
+          "name": "crash after authorization, before execution: NO side effect; replay refused across restart; audit records no execution",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "executor_entered=true provider_mutated=false replay_refused=true (ReplayDetectedError) audit=action.replay_detected,action.validated,action.proposed"
+        },
+        {
+          "name": "crash after the provider applied the mutation but before the firewall observed it: no false success, no false failure, replay refused — the local record is honestly silent and reconciliation is the recovery",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "provider_mutated=true replay_refused=true (ReplayDetectedError) audit=action.replay_detected,action.validated,action.proposed"
+        },
+        {
+          "name": "restart control: a COMPLETED authorization stays consumed across restart — the same action id cannot run twice (no double execution)",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "child_done=true replay_refused=true (ReplayDetectedError) audit=action.replay_detected,action.validated,action.proposed,action.executed,action.validated,action.proposed"
         }
       ],
       "skipped": null
