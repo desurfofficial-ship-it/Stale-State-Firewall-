@@ -217,11 +217,12 @@ Exit codes are deterministic: `0` allowed/success, `1` denied/policy decision, `
 ## Testing
 
 ```bash
-npm test           # 293 tests: unit, integration, contract, kill, race, property, red-team audit, conditional execution, independent assurance
+npm test           # 312 tests: unit, integration, contract, kill, race, property, red-team audit, conditional execution, independent assurance, dogfood regressions, operationalization, trust-domain
 npm run build
 npm run lint
 npm run typecheck
 npm run check:hygiene
+npm run dogfood     # continuous dogfood harness — also enforced in CI (.github/workflows/ci.yml)
 ```
 
 The kill suite (docs/testing.md) tries to force the firewall into allowing an action it should reject: forged versions, fabricated timestamps, replay, provider outages, dependency omission, audit tampering, configuration attacks. All fail closed.

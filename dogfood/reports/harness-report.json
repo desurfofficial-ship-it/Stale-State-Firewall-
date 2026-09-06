@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-09-06T07:26:55.183Z",
-  "finished_at": "2026-09-06T07:26:55.407Z",
+  "started_at": "2026-09-06T07:31:28.021Z",
+  "finished_at": "2026-09-06T07:31:28.262Z",
   "with_github": false,
   "scenario_counts": {
     "PASS": 11
@@ -15,7 +15,7 @@
       "id": "stale-config-edit",
       "title": "Stale deploy-config edit is refused by the provider CAS; recovery is actionable",
       "verdict": "PASS",
-      "duration_ms": 8,
+      "duration_ms": 9,
       "steps": [
         {
           "name": "stale conditional edit refused by provider; human edit preserved",
@@ -47,7 +47,7 @@
       "id": "concurrent-deploy-flip",
       "title": "Two agents flipping one deployment on a shared store: exactly one executes",
       "verdict": "PASS",
-      "duration_ms": 6,
+      "duration_ms": 7,
       "steps": [
         {
           "name": "exactly one agent executed the flip; the other was refused",
@@ -71,7 +71,7 @@
       "id": "replay-and-tamper",
       "title": "Replay is refused; an authorization for one target cannot mutate another",
       "verdict": "PASS",
-      "duration_ms": 2,
+      "duration_ms": 3,
       "steps": [
         {
           "name": "legitimate CI workflow edit executes once",
@@ -150,7 +150,7 @@
       "id": "unknown-outcome",
       "title": "Lost response after send: explicit UNKNOWN outcome, unsafe retry, replay refused",
       "verdict": "PASS",
-      "duration_ms": 1,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "recorded as explicit UNKNOWN (never success, never \"not executed\")",
@@ -181,7 +181,7 @@
       "id": "http-conditional-mutation",
       "title": "HTTP If-Match CAS end to end: matching state applies, stale state gets 412 with no mutation",
       "verdict": "PASS",
-      "duration_ms": 85,
+      "duration_ms": 84,
       "steps": [
         {
           "name": "correct server, If-Match matches: mutation applied under provider-enforced CAS",
@@ -213,7 +213,7 @@
       "id": "http-broken-server-boundary",
       "title": "Documented boundary: an If-Match-ignoring server voids the CAS — the firewall records what it can see",
       "verdict": "PASS",
-      "duration_ms": 9,
+      "duration_ms": 11,
       "steps": [
         {
           "name": "broken server applied the stale write; firewall records its own vantage honestly (documented trust boundary — operator MUST verify If-Match per endpoint)",
@@ -251,7 +251,7 @@
       "id": "policy-change",
       "title": "Policy change: consumed authorizations dead, live authorizations bounded by deadline, fresh actions follow new policy",
       "verdict": "PASS",
-      "duration_ms": 1,
+      "duration_ms": 2,
       "steps": [
         {
           "name": "a consumed authorization stays dead after a policy change (single-use, audited)",
