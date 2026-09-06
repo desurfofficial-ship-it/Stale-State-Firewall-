@@ -74,6 +74,51 @@ providerContract('memory', () => {
   };
 });
 
+// FL-9 regression: the memory fixture's seeding helper (put) and its
+// external-actor simulation primitive (mutate) have deliberately different
+// version semantics. These tests pin both so the distinction can never
+// silently regress into a CAS-invisible interference path.
+describe('memory provider: put/mutate version semantics (FL-9)', () => {
+  it('the interference primitive mutate() always advances the version, so a stale CAS refuses', async () => {
+    const provider = new InMemoryStateProvider('memory');
+    provider.put('file', 'f', { content: 'v0' }, nowIso());
+    const authorizedVersion = provider.get('file', 'f')!.version;
+
+    // A concurrent external actor changes the resource while an action is
+    // authorized against `authorizedVersion`.
+    const bumped = provider.mutate('file', 'f', { content: 'v1' }, nowIso());
+    expect(bumped).not.toBe(authorizedVersion);
+    expect(provider.get('file', 'f')!.version).toBe(bumped);
+
+    // The authorization computed against the stale version MUST be refused
+    // by the provider's atomic CAS.
+    const result = await provider.conditionalExecute({
+      ref: { source: 'memory', resource: 'file', resource_id: 'f' },
+      expected_version: authorizedVersion,
+      changes: { content: 'agent-write' },
+    });
+    expect(result.outcome).toBe('condition_failed');
+    expect(result.current_version).toBe(bumped);
+  });
+
+  it('put() on an EXISTING resource is deliberately version-preserving (documented re-seeding semantics)', () => {
+    const provider = new InMemoryStateProvider('memory');
+    provider.put('file', 'f', { content: 'v0' }, nowIso());
+    const seeded = provider.get('file', 'f')!.version;
+
+    // Re-seed content without an explicit version: the version is KEPT.
+    // This is a fixture convenience, documented on put() — never a
+    // substitute for mutate() when simulating interference.
+    provider.put('file', 'f', { content: 'v1' }, nowIso());
+    expect(provider.get('file', 'f')!.version).toBe(seeded);
+    expect(provider.get('file', 'f')!.metadata).toEqual({ content: 'v1' });
+
+    // An explicit version argument always wins.
+    provider.put('file', 'f', { content: 'v2' }, nowIso(), 'v-pinned');
+    expect(provider.get('file', 'f')!.version).toBe('v-pinned');
+  });
+});
+
 describe('http provider contract against a live local server', () => {
   let server: Server;
   let baseUrl: string;
