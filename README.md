@@ -217,12 +217,13 @@ Exit codes are deterministic: `0` allowed/success, `1` denied/policy decision, `
 ## Testing
 
 ```bash
-npm test           # 312 tests: unit, integration, contract, kill, race, property, red-team audit, conditional execution, independent assurance, dogfood regressions, operationalization, trust-domain
+npm test           # 314 tests: unit, integration, contract, kill, race, property, red-team audit, conditional execution, independent assurance, dogfood regressions, operationalization, trust-domain, audit request visibility
 npm run build
 npm run lint
 npm run typecheck
 npm run check:hygiene
 npm run dogfood     # continuous dogfood harness — also enforced in CI (.github/workflows/ci.yml)
+npm run dogfood:deps  # live WF-2 dependency-update workflow (sandbox, needs SSF_GITHUB_TOKEN; fails closed without)
 ```
 
 The kill suite (docs/testing.md) tries to force the firewall into allowing an action it should reject: forged versions, fabricated timestamps, replay, provider outages, dependency omission, audit tampering, configuration attacks. All fail closed.
@@ -240,6 +241,8 @@ The kill suite (docs/testing.md) tries to force the firewall into allowing an ac
 - [SDK reference](docs/sdk.md)
 - [Testing strategy](docs/testing.md)
 - [Limitations](docs/limitations.md)
+- [Internal workflows (dogfood program)](docs/INTERNAL_WORKFLOWS.md)
+- [Sustained internal dogfood report](docs/SUSTAINED_INTERNAL_DOGFOOD_REPORT.md)
 
 ## Roadmap
 
