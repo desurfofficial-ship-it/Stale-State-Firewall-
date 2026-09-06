@@ -57,6 +57,20 @@ use "secure", "protected", or "atomic" without the scope):
 | HTTP resource with `mutation` config | SUPPORTED | `If-Match: <authorized version>` on the configured mutation (412/409 by default ⇒ condition failed) | the HTTP server, inside the mutation request | **REQUIRES OPERATOR VERIFICATION** — FULL only after the checklist below passes; a server that ignores If-Match silently voids the CAS (demonstrated end to end by dogfood scenario 08 / S14 Case C) |
 | HTTP resource without `mutation` config | UNSUPPORTED | — | — | **UNSUPPORTED** (best-effort re-check only) |
 
+### Internal verification record (§27)
+
+The matrix above is the *claim*; this table is the *evidence*. Anything not
+listed here as verified is NOT verified — treat it as UNSUPPORTED until an
+operator runs the checklist and appends a row.
+
+| Provider / resource | Guarantee claimed | Verification status | Operator | Last verified | Evidence | Known limitations |
+|---|---|---|---|---|---|---|
+| In-memory | FULL | **VERIFIED** (automated, every CI run) | contract suite + continuous harness | 2026-09-06 | `test/contract/providers.test.ts`; harness scenarios 01–11 | reference provider; single-process event-loop atomicity |
+| GitHub `file` | FULL | **VERIFIED** (live API, dedicated sandbox repo only) | dogfood harness scenario 12 (live run) | 2026-09-06 | CAS satisfied → mutation applied; blob-sha moved in CAS window → GitHub refused the stale write (409-class); no credentials in audit records. Deep campaign: dogfood S13 | GitHub other resources: UNSUPPORTED (no expected-revision parameter) |
+| HTTP sandbox server (`/broken` route) | — | **VERIFIED AS BOUNDARY DEMO** (controlled negative rig) | harness scenario 08 / dogfood S14 Case C | 2026-09-06 | server ignores If-Match → stale write lands while `atomicity=guaranteed` is recorded from the client vantage; audit carries the exact expected state (verification-duty evidence) | demonstrates why unverified endpoints void the CAS silently |
+| HTTP sandbox server (correct ETag route) | FULL (for that server) | **VERIFIED** (controlled local server) | harness scenario 07 / dogfood S14 | 2026-09-06 | If-Match match → applied; concurrent mutation → 412, no mutation | applies ONLY to this server, not to arbitrary endpoints |
+| Any real production HTTP endpoint | REQUIRES OPERATOR VERIFICATION | **NOT VERIFIED** (per-endpoint duty) | deploying operator | — | run the checklist below; append a row here with who/when/endpoint/evidence | unverified endpoint = treat as UNSUPPORTED, policy fails closed |
+
 Executors plug into this via the optional `conditionalExecutionSupported()` / `conditionalExecute(intent, expectedState)` hooks on `ActionExecutor`; the firewall hands them the per-dependency authorized state captured at authorization time. See [atomic-effect-assurance.md](atomic-effect-assurance.md) for the full security model.
 
 Every shipped provider passes the same contract suite (see `test/contract/providers.test.ts`).
