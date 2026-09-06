@@ -5,7 +5,8 @@
 # (desurfofficial-ship-it/ssf-dogfood-sandbox). It never touches production.
 #
 # Deliberate isolation from ordinary CI:
-#   - manual trigger ONLY (workflow_dispatch) — never runs on push/PR
+#   - manual trigger (workflow_dispatch) or reusable-workflow call
+#     (workflow_call, used by scheduled-dogfood.yml) — NEVER runs on push/PR
 #   - protected environment gate (`dogfood-live`) — restrict deployment and
 #     require reviewers in the repository settings if so configured
 #   - fails CLOSED when SSF_GITHUB_TOKEN is absent — a missing credential is
@@ -19,6 +20,7 @@ name: Live provider dogfood
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

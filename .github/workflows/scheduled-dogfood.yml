@@ -1,0 +1,77 @@
+# Sustained dogfood cadence (sustained-internal-dogfood milestone §7).
+#
+# The previous milestones proved the dogfood harness WORKS. This workflow
+# proves it KEEPS working over time — a lightweight recurring cadence built
+# entirely from existing repository infrastructure (no new tooling):
+#
+#   daily (03:17 UTC)      → offline deterministic dogfood (NO credentials)
+#   weekly (Mon 04:07 UTC) → live GitHub sandbox dogfood via the protected
+#                            dogfood-live workflow (reusable call, same
+#                            fail-closed credential guard, same sandbox-only
+#                            environment gate)
+#
+# Ordinary CI (ci.yml) remains the credential-free per-push/PR gate. Live
+# credentials are required only inside the protected `dogfood-live`
+# environment, exactly as before. A missing credential at scheduled time
+# fails the live job CLOSED (visible red, never a silent skip) — that is the
+# honest signal that the live check could not run and must be repaired.
+#
+# Run evidence: each failure uploads the harness report as an artifact;
+# sustained-run records are tracked in docs/INTERNAL_DOGFOOD_LOG.md.
+
+name: Sustained dogfood cadence
+
+on:
+  schedule:
+    - cron: '17 3 * * *'   # daily offline dogfood
+    - cron: '7 4 * * 1'    # weekly live sandbox dogfood (Monday)
+  workflow_dispatch:
+    inputs:
+      run_live:
+        description: 'Also run the live GitHub sandbox dogfood (requires dogfood-live credential)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  offline-dogfood:
+    name: offline dogfood (daily, credential-free)
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
+      github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Offline deterministic dogfood
+        run: npm run dogfood
+
+      - name: Upload dogfood report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sustained-offline-dogfood-report
+          path: dogfood/reports/harness-report.json
+          if-no-files-found: ignore
+
+  live-github-sandbox:
+    name: live GitHub sandbox dogfood (weekly, protected)
+    needs: offline-dogfood
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '7 4 * * 1') ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_live == true)
+    uses: ./.github/workflows/dogfood-live.yml
+    secrets: inherit
