@@ -492,25 +492,35 @@ async function cmdAction(io: CliIo, sub: string[], flags: Map<string, string | b
     return { exitCode: 2 };
   }
   const result = await withFirewall(io, flags, async (firewall) => {
+    const action = await firewall.getAction(actionId);
     const decisions = await firewall.latestDecision(actionId);
     const tail = await firewall.auditTail(100);
     const escalations = await firewall.listEscalations();
-    return { decision: decisions, audit: tail.filter((e) => e.payload['action_id'] === actionId), escalations: escalations.filter((e) => e.action_id === actionId) };
+    return { action, decision: decisions, audit: tail.filter((e) => e.payload['action_id'] === actionId), escalations: escalations.filter((e) => e.action_id === actionId) };
   });
   if (result.notFound) return { exitCode: 2 };
   if (result.error) {
     io.err(renderError(result.error.message));
     return { exitCode: 2 };
   }
-  const { decision, audit, escalations } = result.value!;
-  if (decision === null) {
+  const { action, decision, audit, escalations } = result.value!;
+  if (decision === null && action === null) {
     io.err(`no decision found for action ${actionId}`);
     return { exitCode: 1 };
   }
   if (isJson(flags)) {
-    io.out(JSON.stringify(redactDeep({ decision, audit, escalations }), null, 2));
+    io.out(JSON.stringify(redactDeep({ action, decision, audit, escalations }), null, 2));
   } else {
-    io.out(renderDecisionHuman(decision));
+    if (action !== null) {
+      io.out(`Action:       ${action.action_id} (${action.agent_id})`);
+      io.out(`Requested:    ${JSON.stringify(redactDeep(action.arguments ?? {}))}`);
+      io.out(`Dependencies: ${(action.dependencies ?? []).map((d) => `${d.source}:${d.resource}/${d.resource_id}@${d.version}`).join(', ') || 'none'}`);
+    }
+    if (decision !== null) {
+      io.out(renderDecisionHuman(decision));
+    } else {
+      io.out('No decision recorded for this action id.');
+    }
     if (escalations.length > 0) {
       for (const escalation of escalations) {
         io.out(`Escalation:  ${escalation.status}${escalation.resolved_by ? ` by ${escalation.resolved_by}` : ''}`);

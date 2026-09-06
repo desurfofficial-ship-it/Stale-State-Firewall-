@@ -19,6 +19,7 @@
 
 import type {
   ActionExecutor,
+  ActionIntent,
   ActionIntentInput,
   RiskLevel,
 } from '../domain/action.js';
@@ -280,6 +281,18 @@ export class StaleStateFirewall {
   async latestDecision(actionId: string): Promise<DecisionRecord | null> {
     const ctx = this.requireCtx();
     return ctx.store.getLatestDecision(actionId);
+  }
+
+  /**
+   * The persisted (redacted) action intent for an action id, if any.
+   * Sustained-dogfood milestone §19: an operator investigating an incident
+   * must be able to answer "what was actually requested" from the record
+   * alone. Arguments were already persisted redacted (validate-action); this
+   * only exposes them — read-only, no new persistence.
+   */
+  async getAction(actionId: string): Promise<ActionIntent | null> {
+    const ctx = this.requireCtx();
+    return ctx.store.getAction(actionId);
   }
 
   // ---- Internal hooks for ProtectedTool -------------------------------------
