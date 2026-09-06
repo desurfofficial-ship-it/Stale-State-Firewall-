@@ -4,18 +4,29 @@
  * Every failure mode is a distinct, catchable type (spec §54). Infrastructure
  * uncertainty must NEVER be silently converted into a successful validation
  * or an ALLOW decision (spec §26, invariant 7).
+ *
+ * Recovery contract (milestone: internal operationalization): every failure
+ * that reaches an agent or operator carries `recovery` — the authoritative
+ * answer to what failed, whether retrying is safe, and what to do next.
  */
+
+import type { RecoveryGuidance } from './recovery.js';
+import { guidanceFor, HUMAN_REVIEW_GUIDANCE } from './recovery.js';
+import { classifyProviderFailure, type ProviderFailureKind } from '../providers/types.js';
 
 export interface FirewallErrorOptions {
   code: string;
   message: string;
   details?: unknown;
   cause?: unknown;
+  /** Machine-readable recovery contract (milestone §8/§9). */
+  recovery?: RecoveryGuidance;
 }
 
 export class FirewallError extends Error {
   readonly code: string;
   readonly details?: unknown;
+  readonly recovery?: RecoveryGuidance;
 
   constructor(options: FirewallErrorOptions) {
     super(options.message, { cause: options.cause });
@@ -23,6 +34,9 @@ export class FirewallError extends Error {
     this.code = options.code;
     if (options.details !== undefined) {
       this.details = options.details;
+    }
+    if (options.recovery !== undefined) {
+      this.recovery = options.recovery;
     }
   }
 
@@ -32,6 +46,7 @@ export class FirewallError extends Error {
       code: this.code,
       message: this.message,
       ...(this.details !== undefined ? { details: this.details } : {}),
+      ...(this.recovery !== undefined ? { recovery: this.recovery } : {}),
     };
   }
 }
@@ -69,17 +84,50 @@ export class PolicyNotFoundError extends ConfigurationError {
   }
 }
 
-/** A state provider could not be reached or timed out. */
+/**
+ * A state provider could not be reached or timed out.
+ *
+ * Carries a `kind` from the internal provider-failure classification
+ * (NOT_FOUND / RATE_LIMITED / TIMEOUT / NETWORK_ERROR / SERVER_ERROR / ...)
+ * so callers branch deterministically instead of parsing messages, and the
+ * provider-failure recovery contract (fail closed, then fresh evaluation).
+ */
 export class ProviderUnavailableError extends FirewallError {
+  readonly kind: ProviderFailureKind;
+
   constructor(provider: string, message: string, details?: unknown, cause?: unknown) {
-    super({ code: 'SSF_PROVIDER_UNAVAILABLE', message: `provider "${provider}" unavailable: ${message}`, details, cause });
+    const status = (details as { status?: number } | undefined)?.status ?? null;
+    // The GitHub adapter reports quota exhaustion with status 403 plus an
+    // explicit message marker; classify it as RATE_LIMITED, not FORBIDDEN.
+    const kind = /rate limit exhausted/i.test(message)
+      ? 'RATE_LIMITED' as ProviderFailureKind
+      : classifyProviderFailure({ status, error: message });
+    super({
+      code: 'SSF_PROVIDER_UNAVAILABLE',
+      message: `provider "${provider}" unavailable: ${message}`,
+      details,
+      cause,
+      recovery: kind === 'RATE_LIMITED' ? guidanceFor('rate_limit') : guidanceFor('provider_failure'),
+    });
+    this.kind = kind;
   }
 }
 
-/** A provider responded with malformed, partial, or unparseable state. */
+/**
+ * A provider responded with malformed, partial, or unparseable state, or the
+ * requested capability is not configured for the resource (kind: UNSUPPORTED).
+ */
 export class ProviderResponseError extends FirewallError {
-  constructor(provider: string, message: string, details?: unknown) {
-    super({ code: 'SSF_PROVIDER_RESPONSE', message: `provider "${provider}" returned malformed state: ${message}`, details });
+  readonly kind: ProviderFailureKind;
+
+  constructor(provider: string, message: string, details?: unknown, kind: ProviderFailureKind = 'UNSUPPORTED') {
+    super({
+      code: 'SSF_PROVIDER_RESPONSE',
+      message: `provider "${provider}" returned malformed state: ${message}`,
+      details,
+      recovery: guidanceFor('provider_failure'),
+    });
+    this.kind = kind;
   }
 }
 
@@ -119,6 +167,7 @@ export class ActionExpiredError extends FirewallError {
       code: 'SSF_ACTION_EXPIRED',
       message: `action ${actionId} authorization expired at ${expiredAt}`,
       details: { action_id: actionId, expired_at: expiredAt },
+      recovery: guidanceFor('authorization_expired'),
     });
   }
 }
@@ -126,7 +175,7 @@ export class ActionExpiredError extends FirewallError {
 /** Caller is not permitted to perform this operation through this surface. */
 export class UnauthorizedActionError extends FirewallError {
   constructor(message: string, details?: unknown) {
-    super({ code: 'SSF_UNAUTHORIZED', message, details });
+    super({ code: 'SSF_UNAUTHORIZED', message, details, recovery: HUMAN_REVIEW_GUIDANCE });
   }
 }
 
@@ -137,6 +186,7 @@ export class ReplayDetectedError extends FirewallError {
       code: 'SSF_REPLAY_DETECTED',
       message: `replay detected for action ${actionId}; authorization cannot be reused`,
       details,
+      recovery: guidanceFor('replay'),
     });
   }
 }
@@ -148,6 +198,7 @@ export class EscalationPendingError extends FirewallError {
       code: 'SSF_ESCALATION_PENDING',
       message: `action ${actionId} requires human approval before it can proceed`,
       details: { action_id: actionId },
+      recovery: HUMAN_REVIEW_GUIDANCE,
     });
   }
 }

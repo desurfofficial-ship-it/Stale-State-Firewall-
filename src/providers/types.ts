@@ -87,6 +87,50 @@ export interface StateProvider {
   conditionalExecute?(request: ConditionalMutationRequest): Promise<ConditionalMutationResult>;
 }
 
+/**
+ * Internal classification of provider failures (milestone: internal
+ * operationalization, §10). Adapters keep their typed error classes —
+ * semantically different failures are NEVER collapsed into one generic
+ * error — but every provider error additionally carries one of these
+ * kinds so callers can branch deterministically without parsing messages.
+ */
+export type ProviderFailureKind =
+  | 'CONDITION_FAILED'
+  | 'NOT_FOUND'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'RATE_LIMITED'
+  | 'TIMEOUT'
+  | 'SERVER_ERROR'
+  | 'NETWORK_ERROR'
+  | 'UNKNOWN_OUTCOME'
+  | 'UNSUPPORTED';
+
+/**
+ * Classifies a provider failure from its status code and error message.
+ * Deterministic: the same inputs always yield the same kind.
+ */
+export function classifyProviderFailure(input: {
+  status?: number | null;
+  error?: unknown;
+}): ProviderFailureKind {
+  const status = input.status ?? null;
+  if (status !== null) {
+    if (status === 404) return 'NOT_FOUND';
+    if (status === 401) return 'UNAUTHORIZED';
+    if (status === 403) return 'FORBIDDEN';
+    if (status === 429) return 'RATE_LIMITED';
+    if (status === 412 || status === 409) return 'CONDITION_FAILED';
+    if (status >= 500) return 'SERVER_ERROR';
+  }
+  const message = input.error instanceof Error ? `${input.error.name}: ${input.error.message}` : String(input.error ?? '');
+  // AbortSignal.timeout surfaces as a TimeoutError DOMException; some runtimes
+  // wrap it. Match the stable substrings before generic network patterns.
+  if (/TimeoutError|timed out|The operation was aborted due to timeout/i.test(message)) return 'TIMEOUT';
+  if (/fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network/i.test(message)) return 'NETWORK_ERROR';
+  return 'UNKNOWN_OUTCOME';
+}
+
 /** Helper to build a provider-scoped error. */
 export function providerNotConfigured(source: string): Error {
   return new Error(`no provider configured for source "${source}"`);

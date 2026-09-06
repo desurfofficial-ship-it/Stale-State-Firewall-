@@ -1,0 +1,87 @@
+# SSF internal baseline configuration (operationalization milestone §6).
+# Reference copy of docs/POLICY_BASELINE.md. Adapt matchers to your tools;
+# keep the outcome mappings. Validated by `ssf policy validate`.
+
+firewall:
+  mode: enforce            # observe during rollout, then enforce
+  storage:
+    type: sqlite
+    path: ./ssf-state.db   # one store per trust domain; be explicit (no accidental sharing)
+
+defaults:
+  on_fresh: allow
+  on_stale: revalidate
+  on_unknown: revalidate   # CRITICAL policies escalate instead
+  on_invalid: deny         # forbidden to change anywhere
+
+actions:
+  # ---- LOW: read-derived writes (comments, labels) ------------------------
+  - name: low-read-derived-write
+    description: comments/labels derived from observed state
+    match: { operation: "post_*note|add_label" }
+    risk: LOW
+    freshness: { strategy: ttl, max_age: 5m }
+    on_unknown: revalidate
+    execution:
+      deadline: 5m
+      allow_idempotent_retry: true   # only for genuinely idempotent tools
+
+  # ---- MEDIUM: non-prod config edits, dependency bumps --------------------
+  - name: medium-config-and-deps
+    description: staging config edits and dependency updates
+    match: { operation: "update_staging_config|bump_dependency" }
+    risk: MEDIUM
+    freshness: { strategy: version }
+    require_dependencies: true
+    on_unknown: revalidate
+    execution:
+      deadline: 2m
+      require_conditional_execution: true   # CAS-capable resources only; deny otherwise
+      on_conditional_unavailable: deny
+
+  # ---- HIGH: prod config, CI modification, deploys -------------------------
+  - name: high-prod-mutation
+    description: production config, CI workflow, deployment trigger
+    match: { tool: "ops|github", operation: "update_prod_config|update_ci_workflow|deploy*" }
+    risk: HIGH
+    freshness: { strategy: version }
+    require_dependencies: true
+    preconditions:
+      - { field: status, operator: equals, value: idle, dependency: "memory:deployment/*" }
+    on_unknown: revalidate
+    execution:
+      deadline: 30s
+      require_conditional_execution: true
+      on_conditional_unavailable: deny
+
+  # ---- CRITICAL: migrations, destructive ops, security policy --------------
+  - name: critical-destructive
+    description: migrations, purges, security policy changes
+    match: { operation: "run_migration|purge_*|update_security_policy" }
+    risk: CRITICAL
+    freshness: { strategy: version }
+    require_dependencies: true
+    on_unknown: escalate      # a human confirms when state is unverifiable
+    on_stale: revalidate
+    execution:
+      deadline: 30s
+      require_conditional_execution: true
+      on_conditional_unavailable: deny
+
+policy_tests:
+  # Pin the baseline: a proven-changed deployment must never authorize a flip.
+  - name: baseline-invalid-state-denies
+    action:
+      agent_id: test-bot
+      operation: deploy_production
+      dependencies:
+        - source: memory
+          resource: deployment
+          resource_id: prod
+          version: v1
+    state:
+      - resource: deployment
+        resource_id: prod
+        version: v2
+        metadata: { status: idle }
+    expect_decision: DENY

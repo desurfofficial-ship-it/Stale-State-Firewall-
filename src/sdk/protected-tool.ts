@@ -14,6 +14,7 @@ import type { ActionIntentInput, ActionExecutor, ExpectedStateEntry, ExecutionRe
 import type { DecisionRecord } from '../domain/decision.js';
 import type { StateDependencyInput } from '../domain/state.js';
 import { FirewallError } from '../domain/errors.js';
+import { HUMAN_REVIEW_GUIDANCE, POLICY_BLOCKED, type RecoveryGuidance } from '../domain/recovery.js';
 import type { StaleStateFirewall } from './firewall.js';
 
 /** Raised when the firewall did not authorize the protected execution. */
@@ -26,8 +27,19 @@ export class BlockedActionError extends FirewallError {
    * next step (fresh re-evaluation — never a blind retry).
    */
   readonly execution?: ExecutionResult;
+  /**
+   * Machine-readable recovery contract (operationalization milestone):
+   * what failed, whether retrying is safe, and the deterministic next
+   * steps. Drawn from the execution result when one exists, otherwise
+   * derived from the decision (DENY/REVALIDATE -> fresh evaluation;
+   * ESCALATE -> human review).
+   */
+  override readonly recovery?: RecoveryGuidance;
 
   constructor(decision: DecisionRecord, execution?: ExecutionResult) {
+    const recovery: RecoveryGuidance =
+      execution?.recovery ??
+      (decision.decision === 'ESCALATE' ? HUMAN_REVIEW_GUIDANCE : POLICY_BLOCKED);
     super({
       code: 'SSF_ACTION_BLOCKED',
       message: `action blocked by Stale-State Firewall: ${decision.decision} (${decision.reason})`,
@@ -38,10 +50,12 @@ export class BlockedActionError extends FirewallError {
           ? { conditional_execution: execution.conditional_execution }
           : {}),
       },
+      recovery,
     });
     this.name = 'BlockedActionError';
     this.decision = decision;
     this.execution = execution;
+    this.recovery = recovery;
   }
 }
 

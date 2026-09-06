@@ -22,6 +22,13 @@ export interface MetricCounters {
   conditional_executions_satisfied: number;
   /** Conditional executions rejected by the provider (authorized state no longer true). */
   conditional_executions_failed: number;
+  /**
+   * Executions whose outcome could not be observed (fault, timeout, lost
+   * response after the request was sent): the side effect MAY have occurred.
+   * Operationalization milestone §25 — makes the unknown-outcome rate
+   * visible to local monitoring without transmitting anything.
+   */
+  executions_unknown_outcome: number;
 }
 
 export interface LatencyStats {
@@ -54,6 +61,7 @@ function emptyCounters(): MetricCounters {
     escalations_resolved: 0,
     conditional_executions_satisfied: 0,
     conditional_executions_failed: 0,
+    executions_unknown_outcome: 0,
   };
 }
 

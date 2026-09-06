@@ -60,10 +60,13 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "dogfood": "node dogfood/harness/run-all.mjs",
+    "dogfood:github": "node dogfood/harness/run-all.mjs --with-github",
     "check:hygiene": "node scripts/check-hygiene.mjs",
     "example:github": "npm run build && node examples/github-release-agent/agent.ts",
     "example:database": "npm run build && node examples/database-agent/agent.ts",
-    "example:http": "npm run build && node examples/http-agent/agent.ts"
+    "example:http": "npm run build && node examples/http-agent/agent.ts",
+    "example:canonical": "npm run build && node examples/canonical-agent/agent.ts"
   },
   "dependencies": {
     "yaml": "^2.6.1"

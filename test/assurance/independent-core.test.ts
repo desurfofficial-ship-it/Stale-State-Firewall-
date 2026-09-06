@@ -491,13 +491,16 @@ describe('INDEPENDENT: failure-outcome classification (brief §19)', () => {
       { actionId: 'audit_ir8b' },
     );
     expect(outcome.result!.success).toBe(false);
-    expect(outcome.result!.conditional_execution).toBeUndefined();
+    // Operationalization milestone: faulted conditional operations are
+    // recorded explicitly as 'unknown' (previously absent), never as success.
+    expect(outcome.result!.conditional_execution).toBe('unknown');
     const audit = await h.firewall.auditTail(50);
     expect(audit.some((r) => r.event_type === 'execution.condition_failed' && r.payload['action_id'] === 'audit_ir8b')).toBe(false);
     expect(audit.some((r) => r.event_type === 'action.executed' && r.payload['action_id'] === 'audit_ir8b')).toBe(false);
     const failedEvent = audit.find((r) => r.event_type === 'action.failed' && r.payload['action_id'] === 'audit_ir8b');
     expect(failedEvent).toBeDefined();
-    expect(failedEvent!.payload['conditional_execution']).toBe('not_attempted');
+    expect(failedEvent!.payload['conditional_execution']).toBe('unknown');
+    expect(failedEvent!.payload['retry_safety']).toBe('UNSAFE');
   });
 
   it('IR8c deadline exceeded mid-CAS -> honest failure with an explicit side-effect-unknown note', async () => {

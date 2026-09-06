@@ -7,6 +7,7 @@
  */
 
 import type { StateDependency, StateDependencyInput } from './state.js';
+import type { RecoveryGuidance } from './recovery.js';
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -194,12 +195,27 @@ export interface ExecutionResult {
   atomicity: 'guaranteed' | 'not_guaranteed';
   /**
    * Conditional-execution outcome for this attempt (milestone: atomic effect
-   * assurance). 'not_attempted' when the legacy pre-execution re-check path
-   * was used (best-effort verification, no provider-enforced condition).
+   * assurance; 'unknown' added by the operationalization milestone).
+   *
+   * - 'satisfied': the provider enforced the condition and it held.
+   * - 'failed': the provider REFUSED the operation (stale state); no side effect.
+   * - 'unavailable': the executor could not enforce the condition; no side effect.
+   * - 'unknown': the conditional operation did not complete (fault/timeout/lost
+   *   response) — whether the provider evaluated the condition, and whether the
+   *   side effect occurred, is UNKNOWN. Never treated as success; retry is
+   *   unsafe until external state is inspected.
+   * - 'not_attempted': the legacy pre-execution re-check path was used
+   *   (best-effort verification, no provider-enforced condition).
    */
-  conditional_execution?: 'satisfied' | 'failed' | 'unavailable' | 'not_attempted';
+  conditional_execution?: 'satisfied' | 'failed' | 'unavailable' | 'unknown' | 'not_attempted';
   /** The authorized expected state handed to the conditional executor. */
   expected_state?: Array<{ ref: string; version: string | null }>;
   /** The version the external system reported at conditional-execution time. */
   observed_version?: string | null;
+  /**
+   * Machine-readable recovery contract (milestone: internal
+   * operationalization): what failed, whether retry is safe, and the
+   * deterministic next steps. Present on every failure result.
+   */
+  recovery?: RecoveryGuidance;
 }

@@ -42,6 +42,7 @@ import { newId, ID_PREFIXES } from '../domain/identifiers.js';
 import { refKey } from '../domain/state.js';
 import { canonicalJson } from '../engine/hashing.js';
 import { redactDeep } from '../redaction/redact.js';
+import { guidanceFor } from '../domain/recovery.js';
 
 export interface ExecutionOutcome {
   decision: DecisionRecord;
@@ -447,6 +448,11 @@ export async function executeAction(
     ]);
   } catch (error) {
     const finishedAt = ctx.clock.nowIso();
+    const deadlineBlown = error instanceof Error && error.message.includes('deadline') === true;
+    // A deadline breach means the executor may still be running and may still
+    // apply the effect: the outcome of the side effect is UNKNOWN. Any other
+    // executor error is a clean reported failure (executor trust boundary).
+    const recovery = deadlineBlown ? guidanceFor('unknown_execution_outcome') : guidanceFor('provider_failure');
     const failed: ExecutionResult = {
       execution_id: executionId,
       action_id: intent.action_id,
@@ -458,16 +464,22 @@ export async function executeAction(
       duration_ms: ctx.clock.nowMs() - startMs,
       atomicity: executor.atomicity ?? 'not_guaranteed',
       conditional_execution: 'not_attempted',
+      recovery,
     };
     await ctx.store.saveExecution(failed);
     await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
+    if (deadlineBlown) {
+      ctx.metrics.increment('executions_unknown_outcome');
+    }
     ctx.audit.append('action.failed', {
       action_id: intent.action_id,
       execution_status: 'failed',
       conditional_execution: 'not_attempted',
       reason: failed.error,
       latency_ms: failed.duration_ms,
-      note: failed.error?.includes('deadline') === true
+      failure_kind: recovery.failure_kind,
+      retry_safety: recovery.retry_safety,
+      note: deadlineBlown
         ? 'the side effect may still have been performed by the executor; atomicity is not guaranteed'
         : undefined,
     });
@@ -487,6 +499,9 @@ export async function executeAction(
     duration_ms: ctx.clock.nowMs() - startMs,
     atomicity: executor.atomicity ?? 'not_guaranteed',
     conditional_execution: 'not_attempted',
+    // The trusted executor reported a clean failure: no side effect, but the
+    // authorization is consumed and the next attempt re-decides from fresh state.
+    ...(raw.success === false ? { recovery: guidanceFor('provider_failure') } : {}),
   };
 
   // Authorization is consumed exactly once, together with the outcome.
@@ -668,8 +683,11 @@ async function executeConditionally(
   } catch (error) {
     // The conditional operation did not complete: the condition outcome is
     // UNKNOWN (the side effect may or may not have been applied). Record a
-    // failure — never success — and consume the authorization.
+    // failure — never success — and consume the authorization. The record
+    // states 'unknown' explicitly (operationalization milestone §11): the
+    // caller must be able to see that the outcome was not observable.
     const finishedAt = ctx.clock.nowIso();
+    const recovery = guidanceFor('unknown_execution_outcome');
     const failed: ExecutionResult = {
       execution_id: executionId,
       action_id: intent.action_id,
@@ -680,10 +698,13 @@ async function executeConditionally(
       finished_at: finishedAt,
       duration_ms: ctx.clock.nowMs() - startMs,
       atomicity: executor.atomicity ?? 'not_guaranteed',
+      conditional_execution: 'unknown',
       expected_state: expectedStateForAudit,
+      recovery,
     };
     await ctx.store.saveExecution(failed);
     await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
+    ctx.metrics.increment('executions_unknown_outcome');
     ctx.audit.append('action.failed', {
       action_id: intent.action_id,
       agent_id: intent.agent_id,
@@ -695,10 +716,12 @@ async function executeConditionally(
       reason: failed.error,
       latency_ms: failed.duration_ms,
       atomicity: failed.atomicity,
-      conditional_execution: 'not_attempted',
+      conditional_execution: 'unknown',
       expected_state: expectedStateForAudit,
       provider_capability: providerCapability,
       decision_ref: decision.decision_id,
+      failure_kind: recovery.failure_kind,
+      retry_safety: recovery.retry_safety,
       note: failed.error?.includes('deadline') === true
         ? 'the side effect may still have been performed by the executor; atomicity is not guaranteed'
         : 'the conditional operation did not complete; whether the provider evaluated the condition is unknown',
@@ -729,6 +752,7 @@ async function executeConditionally(
       conditional_execution: 'failed',
       expected_state: expectedStateForAudit,
       observed_version: conditional.observed_version,
+      recovery: guidanceFor('condition_failed'),
     };
     await ctx.store.saveExecution(rejected);
     await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
@@ -753,6 +777,8 @@ async function executeConditionally(
       provider: executorProviderName(ctx, intent) ?? undefined,
       provider_capability: providerCapability,
       decision_ref: decision.decision_id,
+      failure_kind: 'condition_failed',
+      retry_safety: 'SAFE_ONLY_AFTER_FRESH_EVALUATION',
       reason: 'provider refused the operation: the authorized state changed between authorization and execution',
     });
 
@@ -844,6 +870,7 @@ async function executeConditionally(
       atomicity: 'not_guaranteed',
       conditional_execution: 'unavailable',
       expected_state: expectedStateForAudit,
+      recovery: guidanceFor('provider_failure'),
     };
     await ctx.store.saveExecution(refused);
     await ctx.store.consumeAuthorization(intent.action_id, finishedAt);
@@ -880,6 +907,10 @@ async function executeConditionally(
     atomicity: 'guaranteed',
     conditional_execution: 'satisfied',
     expected_state: expectedStateForAudit,
+    // The condition held at the provider, but the operation itself can still
+    // fail at the application level (trusted executor's word): clean failure,
+    // no side effect, next attempt re-decides from fresh state.
+    ...(conditional.success === false ? { recovery: guidanceFor('provider_failure') } : {}),
   };
 
   // Authorization is consumed exactly once, together with the outcome.

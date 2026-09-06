@@ -34,17 +34,69 @@ Contract rules:
 
 ## Conditional execution capability matrix
 
-| Provider | Conditional execution | Mechanism | Condition evaluated by | Guarantee |
+Capability levels, in plain terms (operationalization milestone §18 — do not
+use "secure", "protected", or "atomic" without the scope):
+
+- **FULL conditional guarantee** — the external system itself refuses the
+  mutation when its authoritative state no longer matches the authorized
+  version. `atomicity: guaranteed` on the execution record is honest.
+- **BEST-EFFORT** — the firewall re-verifies state immediately before the side
+  effect and blocks on drift, but the compare→execute window stays open
+  (recorded as `atomicity: not_guaranteed`).
+- **UNSUPPORTED** — no conditional capability exists; policies requiring it
+  deny (fail closed).
+- **REQUIRES OPERATOR VERIFICATION** — the capability exists on the wire but
+  its enforcement depends on the remote server actually honoring preconditions
+  (see the checklist below). Until verified, treat as UNSUPPORTED.
+
+| Provider / resource | Conditional execution | Mechanism | Condition evaluated by | Guarantee level |
 |---|---|---|---|---|
-| In-memory | SUPPORTED | `conditionalExecute()` — synchronous check-and-mutate, atomic in the event loop | the provider, inside the mutation | FULL (provider-enforced CAS) |
-| GitHub `file` | SUPPORTED | Contents API update with the authorized blob `sha` (stale sha ⇒ 409/422, deleted ⇒ 404) | GitHub, inside the PUT | FULL (provider-enforced CAS) |
-| GitHub other resources | UNSUPPORTED | no expected-revision parameter exists on those mutation endpoints | — | best-effort pre-execution verification |
-| HTTP resource with `mutation` config | SUPPORTED | `If-Match: <authorized version>` on the configured mutation (412/409 by default ⇒ condition failed) | the HTTP server, inside the mutation request | FULL — requires the operator to have verified the server honors RFC 9110 preconditions |
-| HTTP resource without `mutation` config | UNSUPPORTED | — | — | best-effort pre-execution verification |
+| In-memory | SUPPORTED | `conditionalExecute()` — synchronous check-and-mutate, atomic in the event loop | the provider, inside the mutation | **FULL** (provider-enforced CAS) |
+| GitHub `file` | SUPPORTED | Contents API update with the authorized blob `sha` (stale sha ⇒ 409/422, deleted ⇒ 404) | GitHub, inside the PUT | **FULL** (provider-enforced CAS) |
+| GitHub other resources | UNSUPPORTED | no expected-revision parameter exists on those mutation endpoints | — | **UNSUPPORTED** (best-effort re-check only) |
+| HTTP resource with `mutation` config | SUPPORTED | `If-Match: <authorized version>` on the configured mutation (412/409 by default ⇒ condition failed) | the HTTP server, inside the mutation request | **REQUIRES OPERATOR VERIFICATION** — FULL only after the checklist below passes; a server that ignores If-Match silently voids the CAS (demonstrated end to end by dogfood scenario 08 / S14 Case C) |
+| HTTP resource without `mutation` config | UNSUPPORTED | — | — | **UNSUPPORTED** (best-effort re-check only) |
 
 Executors plug into this via the optional `conditionalExecutionSupported()` / `conditionalExecute(intent, expectedState)` hooks on `ActionExecutor`; the firewall hands them the per-dependency authorized state captured at authorization time. See [atomic-effect-assurance.md](atomic-effect-assurance.md) for the full security model.
 
 Every shipped provider passes the same contract suite (see `test/contract/providers.test.ts`).
+
+## HTTP operator verification checklist (§19)
+
+**`If-Match` sent ≠ server guaranteed to enforce it.** Sending the header is
+the client's half of RFC 9110 preconditions; enforcing it is the server's
+half, and a server that ignores the header provides NO atomicity — the stale
+write lands while the client believes the condition was checked. Do not claim
+RFC compliance merely because the header exists. Verify EVERY endpoint before
+pointing an agent at it (the harness scenario `08-http-broken-server-boundary`
+and `dogfood/scripts/sandbox-http-server.mjs` `/broken` endpoint provide the
+negative test rig):
+
+1. **ETag behavior** — GET returns a strong ETag (`"..."`, not `W/"..."`);
+   the ETag changes whenever the semantic state you depend on changes; two
+   consecutive GETs without mutation return the same ETag.
+2. **If-Match enforcement** — PUT with `If-Match: <current ETag>` succeeds;
+   PUT with `If-Match: "stale"` (an ETag you just invalidated by a prior PUT)
+   is refused with **412** (or the configured `condition_failed_status`) and
+   the resource is UNCHANGED (re-GET to confirm no side effect).
+3. **Missing If-Match** — know what the server does with a PUT that carries
+   no If-Match at all (RFC: apply unconditionally). If that is how humans edit
+   the resource too, the ETag you authorized can be invalidated outside the
+   firewall — that is fine; the CAS still protects YOUR mutation.
+4. **Proxy behavior** — intermediaries must not strip `If-Match`/`ETag` or
+   normalize representations so the ETag no longer matches; verify end to end
+   through the REAL network path (load balancers, API gateways, caches).
+5. **Redirect behavior** — 3xx responses must not lose the precondition on
+   replay (the provider follows redirects; confirm the redirected request
+   still carries `If-Match` and the target still enforces it).
+6. **Application semantics** — the ETag must represent the state the
+   CONDITION is about (mutating a different field must bump it), and a 412
+   must be distinguishable from validation errors the server returns for
+   other reasons.
+
+Record the verification (who, when, endpoint, evidence) in your provider
+inventory. Re-verify after any server/framework upgrade. If verification is
+impossible, treat the resource as UNSUPPORTED and let the policy deny.
 
 ## In-memory provider (`stale-state-firewall/adapters/memory`)
 

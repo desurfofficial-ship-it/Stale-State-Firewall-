@@ -1,0 +1,281 @@
+{
+  "started_at": "2026-09-06T04:55:44.017Z",
+  "finished_at": "2026-09-06T04:55:44.334Z",
+  "with_github": false,
+  "scenario_counts": {
+    "PASS": 11
+  },
+  "step_counts": {
+    "EXPECTED_SECURITY_BLOCK": 16,
+    "EXPECTED_SUCCESS": 18,
+    "DOCUMENTED_BOUNDARY": 2
+  },
+  "results": [
+    {
+      "id": "stale-config-edit",
+      "title": "Stale deploy-config edit is refused by the provider CAS; recovery is actionable",
+      "verdict": "PASS",
+      "duration_ms": 8,
+      "steps": [
+        {
+          "name": "stale conditional edit refused by provider; human edit preserved",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "executed=false conditional=failed failed_ref=provider refused: file at v2, authorized v1"
+        },
+        {
+          "name": "recovery contract answers: what happened, retry only after fresh evaluation",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "kind=condition_failed safety=SAFE_ONLY_AFTER_FRESH_EVALUATION"
+        },
+        {
+          "name": "blind replay of the refused authorization is refused (ReplayDetectedError)",
+          "verdict": "EXPECTED_SECURITY_BLOCK"
+        },
+        {
+          "name": "fresh re-evaluation produces a new authorization and the edit applies",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "conditional=satisfied content=service: api replicas: 3 "
+        },
+        {
+          "name": "refKey runtime helper matches expectedState ref format",
+          "verdict": "EXPECTED_SUCCESS"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "concurrent-deploy-flip",
+      "title": "Two agents flipping one deployment on a shared store: exactly one executes",
+      "verdict": "PASS",
+      "duration_ms": 7,
+      "steps": [
+        {
+          "name": "exactly one agent executed the flip; the other was refused",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "winners=1 losers=1"
+        },
+        {
+          "name": "the losing agent received an explainable refusal, not a silent success",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "loser decision=ALLOW conditional=failed"
+        },
+        {
+          "name": "server truth matches exactly the winning claim (no double application)",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "active=green winner=green"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "replay-and-tamper",
+      "title": "Replay is refused; an authorization for one target cannot mutate another",
+      "verdict": "PASS",
+      "duration_ms": 29,
+      "steps": [
+        {
+          "name": "legitimate CI workflow edit executes once",
+          "verdict": "EXPECTED_SUCCESS"
+        },
+        {
+          "name": "sequential replay of the consumed authorization is refused",
+          "verdict": "EXPECTED_SECURITY_BLOCK"
+        },
+        {
+          "name": "authorization for target A cannot drive a CAS on target B (ref-scoped expected state)",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "executed=false conditional=DENY"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "multi-dependency-staleness",
+      "title": "3-dependency release: written-dep drift refused with per-ref attribution",
+      "verdict": "PASS",
+      "duration_ms": 2,
+      "steps": [
+        {
+          "name": "drifted written dependency refused by provider CAS (no stale image bump)",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "conditional=failed"
+        },
+        {
+          "name": "recovery contract present on multi-dependency failure",
+          "verdict": "EXPECTED_SUCCESS"
+        },
+        {
+          "name": "audit names the failed ref and the full authorized expected state",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "failed_ref=memory:file/configs/deploy.yaml expected_state_entries=3"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "provider-fail-closed",
+      "title": "Provider outage during validation fails closed (no unsafe success, no fuzzy ALLOW)",
+      "verdict": "PASS",
+      "duration_ms": 2,
+      "steps": [
+        {
+          "name": "CRITICAL action during provider outage: executor never ran (no unsafe success, no fuzzy ALLOW)",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "outcome=DENY"
+        },
+        {
+          "name": "CRITICAL: the refusal truthfully attributes the outage (agent can tell WHY it was blocked)",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "reason=policy \"flip-deploy\": state validity could not be established — memory:deployment/api-prod is UNKNOWN (current state cou"
+        },
+        {
+          "name": "LOW action during provider outage: executor never ran (no unsafe success, no fuzzy ALLOW)",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "outcome=DENY"
+        },
+        {
+          "name": "LOW: the refusal truthfully attributes the outage (agent can tell WHY it was blocked)",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "reason=policy \"add-comment\": state validity could not be established — memory:deployment/api-prod is UNKNOWN (current state cou"
+        },
+        {
+          "name": "after the provider recovers, actions proceed normally (outage refusal tracked reality)",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "decision=ALLOW"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "unknown-outcome",
+      "title": "Lost response after send: explicit UNKNOWN outcome, unsafe retry, replay refused",
+      "verdict": "PASS",
+      "duration_ms": 2,
+      "steps": [
+        {
+          "name": "recorded as explicit UNKNOWN (never success, never \"not executed\")",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "success=false conditional=unknown"
+        },
+        {
+          "name": "divergence surfaced honestly: the effect landed but the firewall claims no success",
+          "verdict": "EXPECTED_SUCCESS"
+        },
+        {
+          "name": "recovery contract: do NOT retry, inspect external state, then new authorization",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "kind=unknown_execution_outcome safety=UNSAFE"
+        },
+        {
+          "name": "the unknown-outcome authorization cannot be replayed",
+          "verdict": "EXPECTED_SECURITY_BLOCK"
+        },
+        {
+          "name": "unknown-outcome counter visible in local metrics",
+          "verdict": "EXPECTED_SUCCESS"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "http-conditional-mutation",
+      "title": "HTTP If-Match CAS end to end: matching state applies, stale state gets 412 with no mutation",
+      "verdict": "PASS",
+      "duration_ms": 74,
+      "steps": [
+        {
+          "name": "correct server, If-Match matches: mutation applied under provider-enforced CAS",
+          "verdict": "EXPECTED_SUCCESS"
+        },
+        {
+          "name": "concurrent mutation in the CAS window: 412 refused as condition failure, no stale overwrite",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "executed=false conditional=failed observed=\"v3\""
+        },
+        {
+          "name": "HTTP condition failure carries the recovery contract",
+          "verdict": "EXPECTED_SUCCESS"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "http-broken-server-boundary",
+      "title": "Documented boundary: an If-Match-ignoring server voids the CAS — the firewall records what it can see",
+      "verdict": "PASS",
+      "duration_ms": 10,
+      "steps": [
+        {
+          "name": "broken server applied the stale write; firewall records its own vantage honestly (documented trust boundary — operator MUST verify If-Match per endpoint)",
+          "verdict": "DOCUMENTED_BOUNDARY",
+          "detail": "executed=true conditional=satisfied server_revisions=1"
+        },
+        {
+          "name": "the audit carries the exact expected state the condition was sent against (verification duty evidence)",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "expected_state=[{\"ref\":\"http:broken/legacy-config\",\"version\":\"\\\"v1\\\"\"}]"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "dependency-completeness-boundary",
+      "title": "DF-F2 boundary: written dep is CAS-protected; read-only dep drift in the CAS window is not",
+      "verdict": "PASS",
+      "duration_ms": 1,
+      "steps": [
+        {
+          "name": "read-only dependency drift BEFORE authorization -> DENY at validation (declared deps are re-read)",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "decision=DENY"
+        },
+        {
+          "name": "read-only dependency drift IN THE CAS WINDOW -> action executed from authorized values (documented provider limitation: no multi-resource CAS exists; restructure the intent if read-only drift matters)",
+          "verdict": "DOCUMENTED_BOUNDARY",
+          "detail": "executed=true conditional=satisfied atomicity=guaranteed"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "policy-change",
+      "title": "Policy change: consumed authorizations dead, live authorizations bounded by deadline, fresh actions follow new policy",
+      "verdict": "PASS",
+      "duration_ms": 2,
+      "steps": [
+        {
+          "name": "a consumed authorization stays dead after a policy change (single-use, audited)",
+          "verdict": "EXPECTED_SECURITY_BLOCK"
+        },
+        {
+          "name": "fresh attempts are decided under the CURRENT policy (CRITICAL enforced on a new authorization)",
+          "verdict": "EXPECTED_SUCCESS",
+          "detail": "decision=ALLOW risk=CRITICAL"
+        }
+      ],
+      "skipped": null
+    },
+    {
+      "id": "escalation-argument-binding",
+      "title": "Human approval binds to the approved arguments; swapped arguments are refused (DF-3)",
+      "verdict": "PASS",
+      "duration_ms": 2,
+      "steps": [
+        {
+          "name": "destructive action on unverifiable state is held for human approval",
+          "verdict": "EXPECTED_SUCCESS"
+        },
+        {
+          "name": "approved escalation cannot be executed with swapped arguments (approval binds the payload)",
+          "verdict": "EXPECTED_SECURITY_BLOCK"
+        },
+        {
+          "name": "identical resubmission passes the binding but STILL fails closed on unverifiable state",
+          "verdict": "EXPECTED_SECURITY_BLOCK",
+          "detail": "decision=DENY"
+        }
+      ],
+      "skipped": null
+    }
+  ]
+}

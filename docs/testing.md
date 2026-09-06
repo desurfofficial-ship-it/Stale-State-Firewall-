@@ -92,6 +92,33 @@ The atomic-effect-assurance milestone suite (see [atomic-effect-assurance.md](at
 - preconditions type-strict; structural equality order-insensitive
 - duration/glob primitives
 
+### Dogfood (dogfood/ + `test/dogfood/regressions.test.ts`)
+
+Real-usage scenarios using only the public SDK surface:
+
+- **S01–S16 scenario scripts** (`dogfood/scenarios/`) — the deep dogfood campaign
+  (stale edits, concurrency across processes, human intervention, replay,
+  tampering, provider outage, unknown outcomes, live GitHub, live HTTP with
+  correct/broken servers, crash/restart at the critical windows). Records and
+  telemetry land in `dogfood/reports/`.
+- **Continuous harness** (`npm run dogfood`, `dogfood/harness/`) — the fast,
+  repeatable subset: 11 deterministic scenarios + opt-in live GitHub
+  (`--with-github`). Every step is classified as
+  `EXPECTED_SECURITY_BLOCK / EXPECTED_SUCCESS / DOCUMENTED_BOUNDARY /
+  UNEXPECTED_FAILURE / SECURITY_FAILURE`; non-zero exit on anything unexpected.
+  Report: `dogfood/reports/harness-report.json`.
+- **Regression pins** (`test/dogfood/regressions.test.ts`) — DF-1..DF-5: every
+  defect found by dogfooding is pinned by a test.
+
+### Operationalization (`test/operationalization/`)
+
+- **Recovery contract** — the closed retry-semantics table (`RETRY_SEMANTICS`),
+  condition-failure actionability on results and audit events, replay/expiry/
+  provider-error guidance, `BlockedActionError` recovery, explicit
+  `conditional_execution: 'unknown'` outcomes, provider failure
+  classification, `refKey` runtime export, and the `protect()`
+  conditional-unavailable fail-closed path.
+
 ## Quality gates (spec §75)
 
 ```bash
@@ -100,6 +127,7 @@ npm run build        # tsc -> dist/
 npm run lint         # eslint (typescript-eslint)
 npm run typecheck    # tsc --noEmit, strict
 npm run check:hygiene  # no unfinished-work markers, no secret-shaped strings
+npm run dogfood      # continuous dogfood harness (offline scenarios)
 ```
 
 All must pass before the build is considered complete. The hygiene gate enforces the spec §75 requirement that the repository contain no unfinished-work markers and no hardcoded secrets (CI token shapes are detected by pattern).

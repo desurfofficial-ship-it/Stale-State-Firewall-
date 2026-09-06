@@ -13,11 +13,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * The SDK exports `refKey` as a TYPE only; integrators must rebuild the
- * ref-string themselves to match expectedState entries. Dogfood finding
- * DF-FRICTION (SDK ergonomics): the runtime helper is not exported.
+ * Convenience alias. The SDK now exports `refKey` as a RUNTIME helper
+ * (operationalization milestone §12 resolved the earlier friction finding
+ * where it was exported as a type only); scenarios can import it from
+ * `stale-state-firewall` directly.
  */
-export const refKeyOf = (ref) => `${ref.source}:${ref.resource}/${ref.resource_id}`;
+import { refKey as sdkRefKey } from 'stale-state-firewall';
+export const refKeyOf = (ref) => sdkRefKey(ref);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DOGFOOD_DIR = path.resolve(HERE, '..');

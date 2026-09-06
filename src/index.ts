@@ -27,11 +27,17 @@ export type {
   RISK_LEVELS,
   IdempotencyKind,
 } from './domain/action.js';
-export type { StateSnapshot, StateDependency, StateDependencyInput, ResourceReference, StateProvenance, refKey } from './domain/state.js';
+export type { StateSnapshot, StateDependency, StateDependencyInput, ResourceReference, StateProvenance } from './domain/state.js';
+/** Runtime helper for "<source>:<resource>/<resource_id>" keys (dogfood friction finding: previously exported as a type only). */
+export { refKey } from './domain/state.js';
 export type { DecisionType, StalenessClass, DependencyVerdict, DecisionRecord, FirewallMode, PreconditionResult, DECISION_TYPES, STALENESS_CLASSES } from './domain/decision.js';
 export type { FirewallPolicyConfig, FreshnessStrategy, OutcomeDecision, RiskDefaultsConfig, PolicyMatcher, ExecutionPolicyConfig, DependencyFreshnessRule, FRESHNESS_STRATEGIES, OUTCOME_DECISIONS } from './domain/policy.js';
 export type { AuditRecord, AuditEventType, AuditEventPayload, AUDIT_EVENT_TYPES } from './domain/audit.js';
 export type { FirewallEvent, FirewallEventType, EventBus } from './domain/events.js';
+
+// Recovery contract (milestone: internal operationalization)
+export type { RecoveryGuidance, RetrySafety, FailureKind } from './domain/recovery.js';
+export { RETRY_SEMANTICS, guidanceFor, HUMAN_REVIEW_GUIDANCE, POLICY_BLOCKED } from './domain/recovery.js';
 
 // Errors
 export {
@@ -63,7 +69,9 @@ export type {
   StateProvider,
   ConditionalMutationRequest,
   ConditionalMutationResult,
+  ProviderFailureKind,
 } from './providers/types.js';
+export { classifyProviderFailure } from './providers/types.js';
 
 // Configuration
 export { loadConfigFile, resolveGlobalDefaults, resolvePolicyConfig } from './config/loader.js';

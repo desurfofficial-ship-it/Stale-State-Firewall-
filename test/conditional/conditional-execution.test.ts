@@ -337,7 +337,10 @@ describe('conditional execution: failure injection (milestone §21)', () => {
     const outcome = await h.firewall.execute(deployIntent(versionX), executor);
 
     expect(outcome.result!.success).toBe(false);
-    expect(outcome.result!.conditional_execution).toBeUndefined(); // outcome unknown, not 'failed'
+    // Operationalization milestone: recorded explicitly as 'unknown'
+    // (outcome not observable — not 'failed', never success).
+    expect(outcome.result!.conditional_execution).toBe('unknown');
+    expect(outcome.result!.recovery?.retry_safety).toBe('UNSAFE');
     expect(outcome.result!.error).toContain('simulated provider 500');
     // Crash != condition failure: no execution.condition_failed event.
     const audit = await h.firewall.auditTail(50);
@@ -438,7 +441,13 @@ describe('conditional execution: failure injection (milestone §21)', () => {
     };
     const outcome2 = await h.firewall.execute(deployIntent(versionP2, {}, 'prod2'), crashingExecutor, { actionId: 'act_fi4_b' });
     expect(outcome2.result!.success).toBe(false);
-    expect(outcome2.result!.conditional_execution).toBeUndefined();
+    // Operationalization milestone: the faulted conditional operation is
+    // recorded EXPLICITLY as unknown (previously absent), with recovery
+    // guidance saying retry is unsafe until external state is inspected.
+    expect(outcome2.result!.conditional_execution).toBe('unknown');
+    expect(outcome2.result!.recovery?.failure_kind).toBe('unknown_execution_outcome');
+    expect(outcome2.result!.recovery?.retry_safety).toBe('UNSAFE');
+    expect(outcome2.result!.recovery?.side_effect_possible).toBe(true);
 
     const audit = await h.firewall.auditTail(100);
     const failed = audit.find(
@@ -451,7 +460,7 @@ describe('conditional execution: failure injection (milestone §21)', () => {
       (r) => r.event_type === 'action.failed' && r.payload['action_id'] === 'act_fi4_b',
     );
     expect(crashRecord).toBeDefined();
-    expect(crashRecord!.payload['conditional_execution']).toBe('not_attempted');
+    expect(crashRecord!.payload['conditional_execution']).toBe('unknown');
   });
 });
 

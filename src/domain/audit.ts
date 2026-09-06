@@ -58,8 +58,8 @@ export interface AuditEventPayload {
   latency_ms?: number;
   risk_level?: RiskLevel;
   mode?: FirewallMode;
-  /** Conditional-execution outcome (milestone: atomic effect assurance). */
-  conditional_execution?: 'satisfied' | 'failed' | 'unavailable' | 'not_attempted';
+  /** Conditional-execution outcome (milestone: atomic effect assurance; 'unknown' = faulted operation, outcome not observable). */
+  conditional_execution?: 'satisfied' | 'failed' | 'unavailable' | 'unknown' | 'not_attempted';
   /** The authorized expected state the conditional operation was bound to. */
   expected_state?: Array<{ ref: string; version: string | null }>;
   /** The version the external system reported when the condition was evaluated. */
