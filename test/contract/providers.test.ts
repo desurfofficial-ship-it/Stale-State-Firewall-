@@ -98,7 +98,9 @@ describe('memory provider: put/mutate version semantics (FL-9)', () => {
       changes: { content: 'agent-write' },
     });
     expect(result.outcome).toBe('condition_failed');
-    expect(result.current_version).toBe(bumped);
+    if (result.outcome === 'condition_failed') {
+      expect(result.current_version).toBe(bumped);
+    }
   });
 
   it('put() on an EXISTING resource is deliberately version-preserving (documented re-seeding semantics)', () => {
