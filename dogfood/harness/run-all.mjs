@@ -62,6 +62,20 @@ async function main() {
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
   const startedAt = new Date().toISOString();
 
+  // Fail closed when live mode was EXPLICITLY requested but the credential is
+  // absent (FL-11): exiting 0 with loud SKIPPED lines still let a scripted
+  // caller read "PASS" as "live coverage ran". The CI workflow has its own
+  // guard step; this makes the harness enforce the same contract locally.
+  if (WITH_GITHUB && !process.env.SSF_GITHUB_TOKEN) {
+    say('='.repeat(100));
+    say('ENVIRONMENT FAILURE: --with-github was requested but SSF_GITHUB_TOKEN is not set.');
+    say('Live-provider dogfood requires explicit credentials and fails closed without them.');
+    say('This is NOT a security failure of SSF — set the sandbox token and re-run, or run the offline harness (npm run dogfood).');
+    say('='.repeat(100));
+    process.exitCode = 1;
+    return;
+  }
+
   const sandbox = await startSandbox();
   const ctx = { sandboxPort: sandbox.port, say };
 
