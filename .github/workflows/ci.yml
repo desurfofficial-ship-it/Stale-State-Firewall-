@@ -1,0 +1,59 @@
+# SSF CI — quality gates + continuous internal dogfood (offline).
+#
+# The dogfood gate runs the deterministic harness (npm run dogfood): realistic
+# development-action scenarios against sandbox providers only. It needs NO
+# credentials, NEVER touches production or live resources, and exits non-zero
+# on any UNEXPECTED_FAILURE, SECURITY_FAILURE, or malformed scenario — a
+# security failure can never be downgraded to a warning.
+#
+# Live-provider dogfood is intentionally NOT here: see dogfood-live.yml
+# (manual trigger, protected environment, dedicated sandbox credentials).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality-gates:
+    name: build · typecheck · lint · test · hygiene · dogfood
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Hygiene (no unfinished-work markers, no secret-shaped strings)
+        run: npm run check:hygiene
+
+      - name: Continuous internal dogfood (offline, deterministic)
+        run: npm run dogfood
+
+      - name: Upload dogfood report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-report
+          path: dogfood/reports/harness-report.json
+          if-no-files-found: ignore

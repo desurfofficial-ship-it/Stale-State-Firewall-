@@ -190,7 +190,7 @@ counters, because the firewall cannot judge its own correctness.
 
 ```bash
 npm run dogfood            # 11 deterministic scenarios, offline, <5s
-npm run dogfood -- --with-github   # + live GitHub sandbox scenario (SSF_GITHUB_TOKEN)
+npm run dogfood -- --with-github   # + live sandbox scenarios (SSF_GITHUB_TOKEN, opt-in)
 ```
 
 The harness (`dogfood/harness/`) classifies every step as
@@ -199,6 +199,29 @@ The harness (`dogfood/harness/`) classifies every step as
 `dogfood/reports/harness-report.json`, and exits non-zero on anything unexpected.
 Run it after every SSF or policy change; it is the fast, repeatable answer to
 "does the firewall still hold under realistic development actions?".
+
+**Two dogfood modes** (continuous-dogfood milestone §5): the offline harness is
+deterministic and credential-free — safe to run anywhere, and it is what CI
+runs. Live-provider dogfood (`--with-github`, which includes the adoption
+workflow scenario 13) requires explicit `SSF_GITHUB_TOKEN`, uses ONLY the
+dedicated sandbox repository, and fails closed when the token is absent
+(a missing optional credential is a skip, never a pass and never a
+security failure).
+
+**CI enforcement** (§4): `.github/workflows/ci.yml` runs build · typecheck ·
+lint · test · hygiene · **offline dogfood** on every push and pull request —
+no credentials, deterministic, non-zero exit on any unexpected or security
+failure (which can never be downgraded to a warning). Live-provider dogfood is
+isolated in `.github/workflows/dogfood-live.yml`: `workflow_dispatch` only,
+behind the `dogfood-live` environment, with a fail-closed credential guard;
+ordinary CI never sees credentials.
+
+Scenario 13 (`13-adoption-agent-workflow.mjs`) is the FIRST INTERNAL WORKFLOW
+protected end to end: an agent ships a deployment-config change to the sandbox
+repo (observe → dry-run → authorize → provider CAS → audit), the world
+interferes (human hotfix), the stale claim is denied, and the agent recovers
+autonomously using the machine-readable recovery contract. Friction from these
+sessions is logged in [INTERNAL_DOGFOOD_LOG.md](INTERNAL_DOGFOOD_LOG.md).
 
 A `dogfood:watch` mode was considered and deliberately not added: the harness is
 batch-oriented and cheap enough to run explicitly, and `npm run test:watch`

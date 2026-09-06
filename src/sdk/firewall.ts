@@ -23,6 +23,7 @@ import type {
   RiskLevel,
 } from '../domain/action.js';
 import type { DecisionRecord, FirewallMode } from '../domain/decision.js';
+import { resolve } from 'node:path';
 import type { StateDependency, StateSnapshot } from '../domain/state.js';
 import type { AuditRecord } from '../domain/audit.js';
 import type { EscalationRecord, EscalationStatus, FirewallStore } from '../storage/types.js';
@@ -81,6 +82,10 @@ export class StaleStateFirewall {
   private readonly options: FirewallOptions;
   private readonly protectedToolNames = new Set<string>();
   private readonly clock: Clock;
+  /** Human-readable identity of the authorization/state store in use
+   *  (trust-domain visibility: lets operators notice two deployments that
+   *  accidentally point at the same store). Set during init(). */
+  readonly storeDescription: string = '(store not initialized)';
 
   constructor(options: FirewallOptions = {}) {
     if (!options.config && !options.configPath) {
@@ -119,7 +124,11 @@ export class StaleStateFirewall {
       ? new JsonLogger({ level: file.logging?.level ?? 'info', redact: file.logging?.redact ?? true })
       : new SilentLogger());
 
-    const store = this.options.store ?? (await buildStore(file));
+    const built = this.options.store
+      ? { store: this.options.store, description: 'injected store instance' }
+      : await buildStore(file);
+    const store = built.store;
+    this.storeDescription = built.description;
     await store.init();
 
     const providers = await buildProviders(file, this.options.providers ?? []);
@@ -313,13 +322,14 @@ export interface StateInspectionResult {
   note: string;
 }
 
-async function buildStore(file: FirewallRootConfigFile): Promise<FirewallStore> {
+async function buildStore(file: FirewallRootConfigFile): Promise<{ store: FirewallStore; description: string }> {
   const storage = file.firewall.storage ?? { type: 'sqlite' as const, path: './ssf-state.db' };
   if (storage.type === 'memory') {
-    return new MemoryStore();
+    return { store: new MemoryStore(), description: 'memory store (per-process — not shared across processes or deployments)' };
   }
   const path = storage.path ?? './ssf-state.db';
-  return new SqliteStore({ path });
+  const resolved = resolve(path);
+  return { store: new SqliteStore({ path }), description: `sqlite file=${resolved} (one store per trust domain — sharing this file across environments mixes audit trails and shares replay/authorization scope)` };
 }
 
 async function buildProviders(file: FirewallRootConfigFile, extra: StateProvider[]): Promise<StateProvider[]> {

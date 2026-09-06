@@ -102,13 +102,20 @@ Real-usage scenarios using only the public SDK surface:
   correct/broken servers, crash/restart at the critical windows). Records and
   telemetry land in `dogfood/reports/`.
 - **Continuous harness** (`npm run dogfood`, `dogfood/harness/`) — the fast,
-  repeatable subset: 11 deterministic scenarios + opt-in live GitHub
-  (`--with-github`). Every step is classified as
-  `EXPECTED_SECURITY_BLOCK / EXPECTED_SUCCESS / DOCUMENTED_BOUNDARY /
-  UNEXPECTED_FAILURE / SECURITY_FAILURE`; non-zero exit on anything unexpected.
-  Report: `dogfood/reports/harness-report.json`.
+  repeatable subset: 11 deterministic scenarios + opt-in live GitHub scenarios
+  (`--with-github`, incl. the adoption agent workflow, scenario 13). Every step
+  is classified as `EXPECTED_SECURITY_BLOCK / EXPECTED_SUCCESS /
+  DOCUMENTED_BOUNDARY / UNEXPECTED_FAILURE / SECURITY_FAILURE`; non-zero exit
+  on anything unexpected. Report: `dogfood/reports/harness-report.json`.
 - **Regression pins** (`test/dogfood/regressions.test.ts`) — DF-1..DF-5: every
   defect found by dogfooding is pinned by a test.
+- **CI enforcement** (`.github/workflows/`) — `ci.yml` runs build · typecheck ·
+  lint · test · hygiene · offline dogfood on every push/PR (no credentials,
+  deterministic; a security failure can never be downgraded to a warning).
+  `dogfood-live.yml` isolates live-provider dogfood: manual `workflow_dispatch`
+  only, behind the protected `dogfood-live` environment, fail-closed credential
+  guard, sandbox repository only. Friction from dogfooding is logged in
+  [INTERNAL_DOGFOOD_LOG.md](INTERNAL_DOGFOOD_LOG.md).
 
 ### Operationalization (`test/operationalization/`)
 
@@ -118,6 +125,10 @@ Real-usage scenarios using only the public SDK surface:
   `conditional_execution: 'unknown'` outcomes, provider failure
   classification, `refKey` runtime export, and the `protect()`
   conditional-unavailable fail-closed path.
+- **Trust-domain visibility** — `firewall.storeDescription` surfaces the
+  resolved store identity (per-process memory vs resolved sqlite file path) so
+  `ssf doctor` output alone reveals two deployments accidentally sharing a
+  store (continuous-dogfood milestone §10).
 
 ## Quality gates (spec §75)
 

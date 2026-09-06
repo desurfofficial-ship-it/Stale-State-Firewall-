@@ -111,6 +111,32 @@ export default {
       'HTTP condition failure carries the recovery contract',
     ));
 
+    // Case C (continuous-dogfood §8, checklist item 5 — redirect behavior):
+    // a 307 redirect to the /correct handler. The redirected request must
+    // still carry If-Match, and the target must still enforce it. Verified
+    // through the real network stack (undici follows the redirect).
+    const viaRedirect = async (ifMatch) => fetch(`${base}/redirect/deploy-config`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', ...(ifMatch ? { 'if-match': ifMatch } : {}) },
+      body: JSON.stringify({ content: 'replicas: 5 # via redirect' }),
+    });
+    const currentEtag = (await fetch(`${base}/correct/deploy-config`, { headers: { accept: 'application/json' } })).headers.get('etag');
+    const staleEtag = '"v1"';
+    const rejected = await viaRedirect(staleEtag === currentEtag ? '"definitely-stale"' : staleEtag);
+    const truth1 = await (await fetch(`${base}/__state/correct/deploy-config`)).json();
+    steps.push(expectBlock(
+      rejected.status === 412 && truth1.content === 'replicas: 9 # concurrent actor',
+      'redirected stale If-Match: the target still enforces the precondition through the 307 (412, no mutation)',
+      `status=${rejected.status} revision_after_stale_redirect=${truth1.revision}`,
+    ));
+    const accepted = await viaRedirect(currentEtag);
+    const truth2 = await (await fetch(`${base}/__state/correct/deploy-config`)).json();
+    steps.push(expectSuccess(
+      accepted.status === 200 && truth2.content === 'replicas: 5 # via redirect',
+      'redirected matching If-Match: mutation applied through the 307 (precondition preserved end to end)',
+      `status=${accepted.status} revision_after_matching_redirect=${truth2.revision}`,
+    ));
+
     return { steps };
   },
 };

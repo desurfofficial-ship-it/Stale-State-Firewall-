@@ -573,6 +573,10 @@ async function cmdDoctor(io: CliIo, flags: Map<string, string | boolean>): Promi
 
   const result = await withFirewall(io, flags, async (firewall) => {
     checks.push({ name: 'configuration', status: 'ok', detail: `loaded ${path}` });
+    // Trust-domain visibility (continuous-dogfood milestone §10): surface the
+    // resolved store identity so two deployments accidentally pointed at the
+    // same store file are immediately detectable from doctor output alone.
+    checks.push({ name: 'storage', status: 'ok', detail: `store opened and migrated — ${firewall.storeDescription}` });
 
     const verification = await firewall.verifyAudit();
     checks.push({
@@ -598,8 +602,7 @@ async function cmdDoctor(io: CliIo, flags: Map<string, string | boolean>): Promi
       checks.push({ name: 'configuration', status: 'error', detail: result.error.message });
     }
   } else {
-    // Storage + clock checks run outside the firewall lifecycle (file-based).
-    checks.push({ name: 'storage', status: 'ok', detail: 'store opened and migrated during initialization' });
+    // Clock check runs outside the firewall lifecycle (nothing file-based about it).
     checks.push({ name: 'clock', status: 'ok', detail: `local clock ${new Date().toISOString()}` });
   }
 

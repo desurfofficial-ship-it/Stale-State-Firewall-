@@ -1,0 +1,69 @@
+# SSF live-provider dogfood — ISOLATED job (continuous-dogfood milestone §4/§5).
+#
+# This job exercises REAL provider conditional execution (GitHub Contents API
+# blob-sha CAS) against the DEDICATED SANDBOX REPOSITORY ONLY
+# (desurfofficial-ship-it/ssf-dogfood-sandbox). It never touches production.
+#
+# Deliberate isolation from ordinary CI:
+#   - manual trigger ONLY (workflow_dispatch) — never runs on push/PR
+#   - protected environment gate (`dogfood-live`) — restrict deployment and
+#     require reviewers in the repository settings if so configured
+#   - fails CLOSED when SSF_GITHUB_TOKEN is absent — a missing credential is
+#     an environment failure of THIS job, never a silent pass and never a
+#     security failure of the firewall
+#   - the harness itself classifies every step and exits non-zero on any
+#     UNEXPECTED_FAILURE / SECURITY_FAILURE (a stale mutation unexpectedly
+#     succeeding IS a security failure and fails the job)
+
+name: Live provider dogfood
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-github-sandbox:
+    name: dogfood:live — GitHub sandbox CAS (manual, protected)
+    runs-on: ubuntu-latest
+    environment: dogfood-live
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Credential guard (fail closed — required for live mode)
+        env:
+          SSF_GITHUB_TOKEN: ${{ secrets.SSF_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$SSF_GITHUB_TOKEN" ]; then
+            echo "ENVIRONMENT FAILURE: SSF_GITHUB_TOKEN is not configured for the dogfood-live environment."
+            echo "Live-provider dogfood requires explicit credentials and fails closed without them."
+            echo "This is NOT a security failure of SSF — configure the sandbox token and re-run."
+            exit 1
+          fi
+
+      - name: Live provider dogfood (sandbox repository only)
+        env:
+          SSF_GITHUB_TOKEN: ${{ secrets.SSF_GITHUB_TOKEN }}
+        run: |
+          echo "LIVE-PROVIDER MODE: exercising real GitHub API against the dedicated sandbox repository only."
+          npm run dogfood -- --with-github
+
+      - name: Upload live dogfood report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-live-report
+          path: dogfood/reports/harness-report.json
+          if-no-files-found: ignore

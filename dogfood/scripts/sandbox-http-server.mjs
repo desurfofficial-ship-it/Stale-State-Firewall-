@@ -8,6 +8,10 @@
  *                   PUT honors If-Match (412 on mismatch, apply + new ETag
  *                   on match). Missing If-Match applies unconditionally
  *                   (standard HTTP).
+ *   /redirect/<id>  307-redirects every request (GET and PUT) to
+ *                   /correct/<id>. Used to verify checklist item 5: the
+ *                   redirected request must still carry If-Match and the
+ *                   target must still enforce it (continuous-dogfood §8).
  *   /broken/<id>    BROKEN server: ignores If-Match entirely. Mutations
  *                   always apply. (The documented operator-verification
  *                   boundary: the firewall cannot detect this.)
@@ -81,6 +85,13 @@ const server = http.createServer((req, res) => {
   }
 
   const [ns, id] = parts;
+
+  // ---- 307 redirect route (checklist item 5: redirect behavior) -----------
+  // Preserves method + body + headers per RFC 9110; undici (the provider's
+  // fetch) re-sends the precondition to the target, which enforces it.
+  if (ns === 'redirect') {
+    return send(res, 307, { location: `/correct/${id}` }, '');
+  }
 
   // ---- mutation-only fault injection (GET is healthy) ----------------------
   if (ns === 'putfail' && req.method !== 'GET') {
